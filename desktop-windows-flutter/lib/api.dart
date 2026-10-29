@@ -87,6 +87,11 @@ class Api {
     return PlayResult(url: url, quality: value['quality'] as String? ?? '');
   }
 
+  /// Warms the first few megabytes of [episodeId] in the bridge so the matching
+  /// [play] call can skip network preparation when auto-advancing.
+  Future<void> preload(String episodeId, {int quality = 1080}) =>
+      _bridge.get('preload', {'id': episodeId, 'quality': '$quality'});
+
   Future<Social> comments(String series, String episode) async =>
       socialFromJson(await _bridge.get('comments', {'series': series, 'episode': episode}));
 

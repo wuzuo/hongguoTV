@@ -58,6 +58,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _scrubbing = false;
   double _scrubValue = 0;
 
+  // Seamless auto-advance: hide the chrome end to end and admit to loading only
+  // when handing the next episode to the player takes unusually long.
+  bool _seamless = false;
+  bool _seamlessSlow = false;
+  Timer? _seamlessTimer;
+  int _preloadedIndex = -1;
+
   // Danmaku state.
   List<TimedComment> _danmaku = const [];
   int _danmakuLoadedUntil = 0;
@@ -77,6 +84,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (_danmakuEnabled && value.inMilliseconds > _danmakuLoadedUntil - 15000) {
           unawaited(_loadDanmaku());
         }
+        _maybePreloadNext();
       }),
       _player.stream.duration.listen((value) {
         if (mounted) setState(() => _duration = value);
@@ -106,6 +114,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveProgress();
     _saveTimer?.cancel();
     _hideTimer?.cancel();
+    _seamlessTimer?.cancel();
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
@@ -117,14 +126,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String get _episodeId =>
       _index >= 0 && _index < widget.detail.episodes.length ? widget.detail.episodes[_index] : '';
 
-  Future<void> _play(int index, {double position = 0, bool resume = true}) async {
+  Future<void> _play(
+    int index, {
+    double position = 0,
+    bool resume = true,
+    bool seamless = false,
+  }) async {
     if (widget.detail.episodes.isEmpty) return;
     final target = index.clamp(0, widget.detail.episodes.length - 1);
     final generation = ++_generation;
     _saveProgress();
+    _hideTimer?.cancel();
+    _seamlessTimer?.cancel();
     setState(() {
       _index = target;
-      _loading = true;
+      _seamless = seamless;
+      _seamlessSlow = false;
+      _preloadedIndex = -1;
+      _loading = !seamless;
+      _controlsVisible = !seamless;
       _finished = false;
       _error = null;
       _loadingMessage = '正在准备第 ${target + 1} 集…';
@@ -134,6 +154,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _danmaku = const [];
       _danmakuLoadedUntil = 0;
     });
+    if (seamless) {
+      _seamlessTimer = Timer(const Duration(milliseconds: 700), () {
+        if (mounted && generation == _generation) setState(() => _seamlessSlow = true);
+      });
+    }
     try {
       final result = await widget.session.api.play(
         widget.detail.episodes[target],
@@ -153,15 +178,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
       if (!mounted || generation != _generation) return;
       await _player.setRate(widget.session.store.speed);
-      if (mounted) setState(() => _loading = false);
+      if (!mounted || generation != _generation) return;
+      _seamlessTimer?.cancel();
+      setState(() {
+        _loading = false;
+        _seamless = false;
+        _seamlessSlow = false;
+      });
       unawaited(_loadDanmaku(reset: true));
     } catch (problem) {
+      _seamlessTimer?.cancel();
       if (!mounted || generation != _generation) return;
       setState(() {
         _loading = false;
+        _seamless = false;
+        _seamlessSlow = false;
         _error = problem.toString();
       });
     }
+  }
+
+  /// Warms the next episode shortly before the current one ends so the seamless
+  /// switch only has to hand an already-parsed stream to the player. Attempted at
+  /// most once per episode; a failure falls back to the normal on-demand fetch.
+  void _maybePreloadNext() {
+    if (!widget.session.store.autoNext) return;
+    final next = _index + 1;
+    if (next >= widget.detail.episodes.length) return;
+    if (_preloadedIndex == next) return;
+    if (_duration.inMilliseconds <= 0) return;
+    final remaining = _duration.inMilliseconds - _position.inMilliseconds;
+    if (remaining < 0 || remaining > 150000) return;
+    _preloadedIndex = next;
+    unawaited(
+      widget.session.api
+          .preload(widget.detail.episodes[next], quality: widget.session.store.quality)
+          .catchError((_) {}),
+    );
   }
 
   Future<void> _loadDanmaku({bool reset = false}) async {
@@ -199,7 +252,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveProgress(completed: true);
     final next = _index + 1;
     if (widget.session.store.autoNext && next < widget.detail.episodes.length) {
-      await _play(next);
+      await _play(next, seamless: true);
     } else if (mounted) {
       setState(() {
         _controlsVisible = true;
@@ -296,6 +349,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   _videoLayer(),
                   if (_loading) _loadingLayer(),
+                  if (!_loading && _seamless && _seamlessSlow) _seamlessSpinner(),
                   if (_error != null) _errorLayer(),
                   _controlsLayer(episodeCount),
                   if (_episodePanel) _episodePanelLayer(),
@@ -337,6 +391,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ),
   );
 
+  /// Deliberately minimal: the frame of the finished episode stays on screen with
+  /// no dimming, and only a delayed indicator appears if the hand-off stalls.
+  Widget _seamlessSpinner() => IgnorePointer(
+    child: Center(
+      child: Container(
+        width: 46,
+        height: 46,
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.42),
+          shape: BoxShape.circle,
+        ),
+        child: const CircularProgressIndicator(strokeWidth: 2.4),
+      ),
+    ),
+  );
+
   Widget _errorLayer() => Container(
     color: Colors.black.withValues(alpha: 0.9),
     child: Center(
@@ -369,11 +440,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _controlsLayer(int episodeCount) {
     final colors = AppTheme.dark.colorScheme;
+    final visible = !_seamless && (_controlsVisible || !_playing);
     return AnimatedOpacity(
-      opacity: _controlsVisible || !_playing ? 1 : 0,
+      opacity: visible ? 1 : 0,
       duration: const Duration(milliseconds: 180),
       child: IgnorePointer(
-        ignoring: !(_controlsVisible || !_playing),
+        ignoring: !visible,
         child: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(

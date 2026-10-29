@@ -36,6 +36,20 @@ fun main() {
         exchange.sendResponseHeaders(status,bytes.size.toLong())
         exchange.responseBody.use { it.write(bytes) }
     }
+    /** Resolves an episode and buffers its first [warmBytes] so a later play call is instant. */
+    fun prepareClip(episode: String, quality: Int, warmBytes: Int): WarmClip {
+        val stream=repository.stream(episode,quality)
+        val clip=RemoteVideo(repository.http,stream)
+        try { clip.warm(warmBytes) } catch(problem: Exception) { clip.close();throw problem }
+        return WarmClip(episode,quality,stream.quality,clip)
+    }
+    fun keepWarmed(prepared: WarmClip) {
+        synchronized(lock) {
+            val previous=warmed
+            warmed=prepared
+            if(previous!=null && previous!==prepared) previous.video.close()
+        }
+    }
     server.createContext("/") { exchange ->
         try {
             val path=exchange.requestURI.path
@@ -92,11 +106,18 @@ fun main() {
                     val episode=detail.episodes.firstOrNull() ?: error("No episodes")
                     val quality=query["quality"]?.toInt() ?: 1080
                     require(quality in setOf(480,720,1080))
-                    val stream=repository.stream(episode,quality)
-                    val clip=RemoteVideo(repository.http,stream)
-                    try { clip.warm() } catch(problem: Exception) { clip.close();throw problem }
-                    synchronized(lock) { warmed?.video?.close();warmed=WarmClip(episode,quality,stream.quality,clip) }
+                    keepWarmed(prepareClip(episode,quality,1024*1024))
                     json(exchange,JSONObject().put("series",detail.series.toJson()).put("episodes",JSONArray(detail.episodes)))
+                }
+                // Preloads the *next* episode while the current one is still playing. The clip
+                // is kept in the same single warm slot that `play` consumes, so switching only
+                // pays for handing the already-parseable stream to the player.
+                "preload" -> synchronized(warmLock) {
+                    val quality=query["quality"]?.toInt() ?: 1080
+                    require(quality in setOf(480,720,1080))
+                    val prepared=prepareClip(query["id"].orEmpty(),quality,4*1024*1024)
+                    keepWarmed(prepared)
+                    json(exchange,JSONObject().put("ok",true).put("quality",prepared.actual))
                 }
                 "play" -> {
                     val quality=query["quality"]?.toInt() ?: 1080

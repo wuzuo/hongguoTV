@@ -73,6 +73,22 @@ void main() {
         expect(response.statusCode, anyOf(200, 206));
         final bytes = await response.fold<int>(0, (sum, chunk) => sum + chunk.length);
         expect(bytes, greaterThan(0), reason: '视频端点应返回数据');
+
+        // Auto-advance preloads the next episode; the following play must hit the
+        // warm slot and still serve seekable ranges.
+        await api.preload(detail.episodes[1], quality: 720);
+        final next = await api.play(detail.episodes[1], quality: 720);
+        expect(next.url, startsWith('http://127.0.0.1:'));
+        expect(next.quality, isNotEmpty);
+        final nextRequest = await client.getUrl(Uri.parse(next.url));
+        nextRequest.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1023');
+        final nextResponse = await nextRequest.close();
+        expect(nextResponse.statusCode, anyOf(200, 206));
+        expect(
+          await nextResponse.fold<int>(0, (sum, chunk) => sum + chunk.length),
+          greaterThan(0),
+          reason: '预加载后的视频端点应返回数据',
+        );
       } finally {
         client.close(force: true);
         await bridge.close();
