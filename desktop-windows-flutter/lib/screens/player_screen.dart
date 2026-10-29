@@ -368,7 +368,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   );
 
   Widget _controlsLayer(int episodeCount) {
-    final colors = Theme.of(context).colorScheme;
+    final colors = AppTheme.dark.colorScheme;
     return AnimatedOpacity(
       opacity: _controlsVisible || !_playing ? 1 : 0,
       duration: const Duration(milliseconds: 180),
@@ -407,7 +407,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _topBar() {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppTheme.dark.colorScheme;
     return SafeArea(
       bottom: false,
       child: Padding(
@@ -526,10 +526,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             SliderTheme(
+              // `context` here belongs to the State, which sits above the player's dark
+              // Theme, so the inherited slider colors come from the app's (possibly light)
+              // theme. Set them explicitly to keep the progress bar visible on video.
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 3,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                activeTrackColor: scheme.primary,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: scheme.primary,
+                overlayColor: scheme.primary.withValues(alpha: 0.18),
               ),
               child: Stack(
                 alignment: Alignment.centerLeft,
@@ -637,7 +644,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   );
 
   Widget _episodePanelLayer() {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppTheme.dark.colorScheme;
     return Positioned.fill(
       child: GestureDetector(
         onTap: () => setState(() {
@@ -698,7 +705,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               child: Container(
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: selected ? scheme.primary : scheme.surfaceContainerHigh,
+                                  // The panel is always dark, so unselected chips use a fixed
+                                  // dark fill instead of the ambient (possibly light) theme —
+                                  // otherwise white-on-white makes episode numbers unreadable.
+                                  color: selected
+                                      ? scheme.primary
+                                      : const Color(0xFF26282F),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
@@ -706,6 +718,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   style: TextStyle(
                                     color: selected ? scheme.onPrimary : Colors.white,
                                     fontSize: 13,
+                                    fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                                   ),
                                 ),
                               ),

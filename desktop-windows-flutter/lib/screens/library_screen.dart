@@ -78,7 +78,7 @@ class LibraryScreen extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) => GridView.builder(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        gridDelegate: dramaGridDelegate(context, constraints.maxWidth),
+        gridDelegate: dramaGridDelegate(constraints.maxWidth),
         itemCount: favorites.length,
         itemBuilder: (context, index) {
           final series = favorites[index];

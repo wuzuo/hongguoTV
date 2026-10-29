@@ -15,6 +15,7 @@ class MacAccount(private val repository: ContentRepository) {
     private var profile: CloudProfile?=null
     private var login: WebLogin?=null
     private var loginID=""
+    private var smsLogin: WebLogin?=null
     @Synchronized fun snapshot()=credentials
     @Synchronized fun handle(exchange: HttpExchange,action: String,query: Map<String,String>): JSONObject {
         val readOnly=action in setOf("status","poll","history","favorites","reservations")
@@ -39,6 +40,7 @@ class MacAccount(private val repository: ContentRepository) {
             }
             "qr" -> {
                 login?.cancel();credentials=null;profile=null
+                smsLogin?.cancel();smsLogin=null
                 val next=WebLogin(repository.http);val qr=next.qr()
                 login=next;loginID=UUID.randomUUID().toString()
                 JSONObject().put("image",Base64.getEncoder().encodeToString(qr.image)).put("expiresIn",qr.expiresIn).put("loginID",loginID)
@@ -59,9 +61,36 @@ class MacAccount(private val repository: ContentRepository) {
                 if(body.optString("loginID")==loginID && loginID.isNotEmpty()) {
                     login?.cancel();login=null;loginID="";credentials=null;profile=null
                 }
+                smsLogin?.cancel();smsLogin=null
                 JSONObject().put("ok",true)
             }
-            "logout" -> { login?.cancel();login=null;loginID="";credentials=null;profile=null;JSONObject().put("ok",true) }
+            "sms/send" -> {
+                val raw=body.optString("mobile").trim()
+                require(raw.isNotEmpty()) { "请输入手机号" }
+                val mobile=PhoneLogin.parse(raw)
+                smsLogin?.cancel()
+                val web=WebLogin(repository.http)
+                val sent=try { web.send(mobile) } catch(problem: Exception) { web.cancel();throw problem }
+                smsLogin=web
+                JSONObject().put("ok",true).put("masked",sent.maskedMobile).put("retrySeconds",sent.retrySeconds)
+            }
+            "sms/verify" -> {
+                val current=checkNotNull(smsLogin) { "请先获取验证码" }
+                val code=body.optString("code").trim()
+                require(code.matches(Regex("[0-9]{4,8}"))) { "请输入 4—8 位验证码" }
+                // A wrong code keeps the session alive so the user can retype it; the core
+                // raises PhoneLogin.Failure(canRetryCode) exactly for that case.
+                val next=current.verify(code)
+                val device=client.registerDevice() ?: error("账号设备初始化失败")
+                val verified=client.profile(next.copy(deviceId=device.deviceId,installId=device.installId))
+                credentials=next;profile=verified;smsLogin=null
+                user(export=true)
+            }
+            "logout" -> {
+                login?.cancel();login=null;loginID=""
+                smsLogin?.cancel();smsLogin=null
+                credentials=null;profile=null;JSONObject().put("ok",true)
+            }
             "history" -> JSONObject().put("items",JSONArray(client.history(account()).map {
                 JSONObject().put("series",it.series.toJson()).put("episodeID",it.episodeId).put("episodeIndex",it.episodeIndex)
                     .put("position",it.position/1000.0).put("duration",it.duration/1000.0)
@@ -92,5 +121,5 @@ class MacAccount(private val repository: ContentRepository) {
             else -> error("账号操作不受支持")
         }
     }
-    @Synchronized fun close() { login?.cancel();credentials=null;profile=null }
+    @Synchronized fun close() { login?.cancel();smsLogin?.cancel();credentials=null;profile=null }
 }

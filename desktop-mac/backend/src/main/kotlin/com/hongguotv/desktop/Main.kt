@@ -148,8 +148,17 @@ fun main() {
                 }
                 else -> exchange.sendResponseHeaders(404,-1)
             }
-        } catch(_: Exception) {
-            runCatching { json(exchange,JSONObject().put("error","请求失败，请重试；若持续失败，请检查网络或更新客户端。"),502) }
+        } catch(problem: Exception) {
+            // The bridge only listens on loopback behind a per-launch token, so the already
+            // user-facing messages (bad phone number, rejected verification code, expired QR)
+            // are safe — and necessary — to show instead of a blanket failure.
+            val detail=when(problem) {
+                is IllegalArgumentException, is IllegalStateException,
+                is PhoneLogin.Failure, is java.io.IOException ->
+                    problem.message?.trim()?.takeIf { it.isNotEmpty() }
+                else -> null
+            }
+            runCatching { json(exchange,JSONObject().put("error",detail ?: "请求失败，请重试；若持续失败，请检查网络或更新客户端。"),502) }
         } finally { exchange.close() }
     }
     Runtime.getRuntime().addShutdownHook(Thread {

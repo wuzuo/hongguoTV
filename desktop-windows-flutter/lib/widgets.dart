@@ -191,7 +191,7 @@ class DramaTile extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 13.5,
               height: 1.25,
               fontWeight: FontWeight.w600,
               color: scheme.onSurface,
@@ -202,7 +202,7 @@ class DramaTile extends StatelessWidget {
             subtitle.isNotEmpty ? subtitle : series.tags,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -346,14 +346,21 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
-/// Responsive grid metrics used by every catalog surface.
-SliverGridDelegate dramaGridDelegate(BuildContext context, double width) {
-  final columns = width < 600 ? 3 : (width / 200).floor().clamp(4, 9);
+/// Responsive grid metrics used by every catalog surface. Cards stay around 150–175 px wide
+/// on a typical 1360 px window; oversized covers push too few titles into view on desktop.
+///
+/// The row height is derived from the real card width (the grids use 20 px side padding), so
+/// the 2:3 cover plus the two-line caption fit at every column count instead of overflowing
+/// when the window gets wider and the cards get narrower.
+SliverGridDelegate dramaGridDelegate(double width) {
+  final columns = width < 600 ? 3 : (width / 168).floor().clamp(4, 24);
+  const spacing = 14.0;
+  final cardWidth = (width - 40) / columns - spacing * (columns - 1) / columns;
   return SliverGridDelegateWithFixedCrossAxisCount(
     crossAxisCount: columns,
-    mainAxisSpacing: 20,
-    crossAxisSpacing: 16,
-    childAspectRatio: 2 / 3.62,
+    mainAxisSpacing: 18,
+    crossAxisSpacing: spacing,
+    mainAxisExtent: cardWidth * 1.5 + 64,
   );
 }
 
@@ -383,7 +390,7 @@ class CatalogGrid extends StatelessWidget {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             sliver: SliverGrid.builder(
-              gridDelegate: dramaGridDelegate(context, constraints.maxWidth),
+              gridDelegate: dramaGridDelegate(constraints.maxWidth),
               itemCount: items.length,
               itemBuilder: (context, index) => DramaTile(
                 series: items[index],

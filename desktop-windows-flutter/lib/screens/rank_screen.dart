@@ -144,7 +144,7 @@ class _RankScreenState extends State<RankScreen> {
     return LayoutBuilder(
       builder: (context, constraints) => GridView.builder(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        gridDelegate: dramaGridDelegate(context, constraints.maxWidth),
+        gridDelegate: dramaGridDelegate(constraints.maxWidth),
         itemCount: _items.length,
         itemBuilder: (context, index) {
           final series = _items[index];

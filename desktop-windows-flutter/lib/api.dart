@@ -120,6 +120,19 @@ class Api {
 
   Future<Map<String, dynamic>> accountQr() => _bridge.post('account/qr');
 
+  /// Sends a real SMS through the platform and returns the masked number plus the cooldown
+  /// the bridge was told to enforce.
+  Future<({String masked, int retrySeconds})> smsSend(String mobile) async {
+    final value = await _bridge.post('account/sms/send', {'mobile': mobile});
+    return (
+      masked: (value['masked'] as String?) ?? mobile,
+      retrySeconds: (value['retrySeconds'] as num?)?.toInt() ?? 60,
+    );
+  }
+
+  Future<AccountInfo> smsVerify(String code) async =>
+      AccountInfo.fromJson(await _bridge.post('account/sms/verify', {'code': code}));
+
   Future<AccountInfo> poll(String loginId) async =>
       AccountInfo.fromJson(await _bridge.get('account/poll', {'loginID': loginId}));
 

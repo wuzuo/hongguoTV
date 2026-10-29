@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_session.dart';
 import '../models.dart';
@@ -12,8 +13,9 @@ import 'detail_screen.dart';
 
 const _cloudTypes = ['账户历史', '账户收藏', '已上线预约', '待上线预约'];
 
-/// Red-fruit account: QR sign-in plus the four read-only cloud lists. The session itself is
-/// encrypted with DPAPI (see [SecretStore]) so it only works for the current Windows user.
+/// Red-fruit account: QR or SMS sign-in plus the four read-only cloud lists. The session
+/// itself is encrypted with DPAPI (see [SecretStore]) so it only works for the current
+/// Windows user.
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key, required this.session});
 
@@ -85,7 +87,7 @@ class _AccountScreenState extends State<AccountScreen> with SingleTickerProvider
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('退出红果账号'),
-        content: const Text('退出后需要重新扫码登录，本机收藏和观看记录会保留。'),
+        content: const Text('退出后需要重新登录，本机收藏和观看记录会保留。'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
           FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('退出')),
@@ -238,7 +240,7 @@ class _AccountScreenState extends State<AccountScreen> with SingleTickerProvider
           child: LayoutBuilder(
             builder: (context, constraints) => GridView.builder(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              gridDelegate: dramaGridDelegate(context, constraints.maxWidth),
+              gridDelegate: dramaGridDelegate(constraints.maxWidth),
               itemCount: state.items.length,
               itemBuilder: (context, index) {
                 final entry = state.items[index];
@@ -290,7 +292,12 @@ class _LoginPanel extends StatefulWidget {
   State<_LoginPanel> createState() => _LoginPanelState();
 }
 
+enum _LoginMode { qr, sms }
+
 class _LoginPanelState extends State<_LoginPanel> {
+  _LoginMode _mode = _LoginMode.qr;
+
+  // QR sign-in
   Timer? _poll;
   String _loginId = '';
   String _image = '';
@@ -299,11 +306,102 @@ class _LoginPanelState extends State<_LoginPanel> {
   bool _checking = false;
   String? _message;
 
+  // Phone + verification code sign-in
+  final _mobile = TextEditingController();
+  final _code = TextEditingController();
+  Timer? _cooldownTimer;
+  int _cooldown = 0;
+  bool _sending = false;
+  bool _verifying = false;
+  bool _codeSent = false;
+  String? _smsMessage;
+
   @override
   void dispose() {
     _poll?.cancel();
+    _cooldownTimer?.cancel();
+    _mobile.dispose();
+    _code.dispose();
     if (_loginId.isNotEmpty) unawaited(_cancel());
     super.dispose();
+  }
+
+  void _switchMode(_LoginMode mode) {
+    if (mode == _mode) return;
+    if (_mode == _LoginMode.qr && _loginId.isNotEmpty) unawaited(_cancel());
+    setState(() {
+      _mode = mode;
+      _message = null;
+      _smsMessage = null;
+    });
+  }
+
+  Future<void> _sendCode() async {
+    if (_sending || _cooldown > 0) return;
+    final raw = _mobile.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _smsMessage = '请输入手机号。');
+      return;
+    }
+    setState(() {
+      _sending = true;
+      _smsMessage = null;
+    });
+    try {
+      final sent = await widget.session.api.smsSend(raw);
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _codeSent = true;
+        _smsMessage = '验证码已发送到 ${sent.masked}。';
+      });
+      _startCooldown(sent.retrySeconds);
+    } catch (problem) {
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _smsMessage = problem.toString();
+      });
+    }
+  }
+
+  void _startCooldown(int seconds) {
+    _cooldownTimer?.cancel();
+    setState(() => _cooldown = seconds);
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _cooldown = _cooldown > 0 ? _cooldown - 1 : 0);
+      if (_cooldown <= 0) timer.cancel();
+    });
+  }
+
+  Future<void> _verify() async {
+    if (_verifying) return;
+    final code = _code.text.trim();
+    if (!RegExp(r'^[0-9]{4,8}$').hasMatch(code)) {
+      setState(() => _smsMessage = '请输入 4—8 位数字验证码。');
+      return;
+    }
+    setState(() {
+      _verifying = true;
+      _smsMessage = null;
+    });
+    try {
+      final info = await widget.session.api.smsVerify(code);
+      if (!mounted) return;
+      setState(() => _verifying = false);
+      widget.onSignedIn(info);
+    } catch (problem) {
+      // A rejected code keeps the bridge session alive, so the user can retype it.
+      if (!mounted) return;
+      setState(() {
+        _verifying = false;
+        _smsMessage = problem.toString();
+      });
+    }
   }
 
   Future<void> _begin() async {
@@ -407,11 +505,13 @@ class _LoginPanelState extends State<_LoginPanel> {
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.qr_code_2, size: 44, color: scheme.primary),
+                Center(child: Icon(Icons.account_circle_outlined, size: 44, color: scheme.primary)),
                 const SizedBox(height: 12),
                 Text(
-                  '扫码登录红果账号',
+                  '登录红果账号',
+                  textAlign: TextAlign.center,
                   style: Theme.of(
                     context,
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -423,45 +523,27 @@ class _LoginPanelState extends State<_LoginPanel> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, height: 1.6, color: scheme.onSurfaceVariant),
                 ),
-                const SizedBox(height: 20),
-                if (_image.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 18),
+                SegmentedButton<_LoginMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: _LoginMode.qr,
+                      icon: Icon(Icons.qr_code_2, size: 18),
+                      label: Text('扫码登录'),
                     ),
-                    child: Image.memory(
-                      base64Decode(_image),
-                      width: 220,
-                      height: 220,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
+                    ButtonSegment(
+                      value: _LoginMode.sms,
+                      icon: Icon(Icons.sms_outlined, size: 18),
+                      label: Text('短信登录'),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(onPressed: _cancel, child: const Text('取消扫码')),
-                ] else
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _begin,
-                    icon: _busy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.qr_code, size: 18),
-                    label: Text(_busy ? '正在获取二维码…' : '获取登录二维码'),
-                  ),
-                if (_message != null) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    _message!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                  ),
-                ],
-                const SizedBox(height: 10),
+                  ],
+                  selected: {_mode},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (value) => _switchMode(value.first),
+                ),
+                const SizedBox(height: 18),
+                if (_mode == _LoginMode.qr) ..._qrContent() else ..._smsContent(scheme),
+                const SizedBox(height: 14),
                 Text(
                   '账号密码不会经过本客户端；本机数据目录：${AppDirs.data.path}',
                   textAlign: TextAlign.center,
@@ -473,5 +555,126 @@ class _LoginPanelState extends State<_LoginPanel> {
         ),
       ),
     );
+  }
+
+  List<Widget> _qrContent() {
+    final scheme = Theme.of(context).colorScheme;
+    return [
+      if (_image.isNotEmpty) ...[
+        Center(
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Image.memory(
+              base64Decode(_image),
+              width: 220,
+              height: 220,
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Center(child: OutlinedButton(onPressed: _cancel, child: const Text('取消扫码'))),
+      ] else
+        FilledButton.icon(
+          onPressed: _busy ? null : _begin,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.qr_code, size: 18),
+          label: Text(_busy ? '正在获取二维码…' : '获取登录二维码'),
+        ),
+      if (_message != null) ...[
+        const SizedBox(height: 14),
+        Text(
+          _message!,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _smsContent(ColorScheme scheme) {
+    return [
+      TextField(
+        controller: _mobile,
+        keyboardType: TextInputType.phone,
+        decoration: const InputDecoration(
+          labelText: '手机号',
+          hintText: '13800138000 或 +886 912345678',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _code,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(8),
+              ],
+              onSubmitted: (_) => unawaited(_verify()),
+              decoration: const InputDecoration(
+                labelText: '验证码',
+                hintText: '4—8 位数字',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 150,
+            child: OutlinedButton(
+              onPressed: _sending || _cooldown > 0 ? null : _sendCode,
+              child: Text(
+                _sending
+                    ? '发送中…'
+                    : _cooldown > 0
+                    ? '$_cooldown 秒后获取'
+                    : (_codeSent ? '重新获取验证码' : '获取验证码'),
+              ),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      FilledButton.icon(
+        onPressed: _verifying ? null : _verify,
+        icon: _verifying
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.login, size: 18),
+        label: Text(_verifying ? '正在登录…' : '登录'),
+      ),
+      if (_smsMessage != null) ...[
+        const SizedBox(height: 12),
+        Text(
+          _smsMessage!,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+      ],
+      const SizedBox(height: 10),
+      Text(
+        '短信由红果平台发送，可能产生费用；验证码错误时可以重新输入，但不要反复获取。'
+        '若短信登录失败，可以改用扫码登录。',
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 11, height: 1.5, color: scheme.onSurfaceVariant),
+      ),
+    ];
   }
 }

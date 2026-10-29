@@ -85,25 +85,28 @@ class Bridge {
   Future<Map<String, dynamic>> get(String path, [Map<String, String>? query]) =>
       _send(path, query: query);
 
+  /// Always issues a POST: the bridge rejects state-changing actions such as `account/qr`
+  /// when they arrive as GET, even when there is no JSON body to send.
   Future<Map<String, dynamic>> post(String path, [Map<String, dynamic>? body]) =>
-      _send(path, body: body);
+      _send(path, body: body, post: true);
 
   Future<Map<String, dynamic>> _send(
     String path, {
     Map<String, String>? query,
     Map<String, dynamic>? body,
+    bool post = false,
   }) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     try {
-      final response = body == null
-          ? await _client.get(uri).timeout(const Duration(seconds: 60))
-          : await _client
+      final response = post
+          ? await _client
                 .post(
                   uri,
                   headers: const {'Content-Type': 'application/json; charset=utf-8'},
-                  body: utf8.encode(jsonEncode(body)),
+                  body: utf8.encode(jsonEncode(body ?? const <String, dynamic>{})),
                 )
-                .timeout(const Duration(seconds: 60));
+                .timeout(const Duration(seconds: 60))
+          : await _client.get(uri).timeout(const Duration(seconds: 60));
       final text = utf8.decode(response.bodyBytes, allowMalformed: true);
       dynamic decoded;
       try {
