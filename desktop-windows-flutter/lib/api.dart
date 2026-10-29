@@ -104,6 +104,8 @@ class Api {
         }),
       );
 
+  /// [durationMs] is the full episode length, matching the platform's
+  /// `playlet_item_duration`; the returned [TimedPage.nextMs] is the next window start.
   Future<TimedPage> danmaku(
     String series,
     String episode, {

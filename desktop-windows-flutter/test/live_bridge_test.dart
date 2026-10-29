@@ -59,9 +59,18 @@ void main() {
           series.id,
           detail.episodes.first,
           startMs: 0,
-          durationMs: 60000,
+          durationMs: 600000,
         );
-        expect(danmaku.nextMs, greaterThanOrEqualTo(0));
+        expect(danmaku.nextMs, greaterThan(0));
+        // The window start may exceed one minute; passing the episode length (not a fixed
+        // 60 s) is what keeps danmaku loading for the rest of the episode.
+        final laterDanmaku = await api.danmaku(
+          series.id,
+          detail.episodes.first,
+          startMs: 90000,
+          durationMs: 600000,
+        );
+        expect(laterDanmaku.nextMs, greaterThan(90000));
 
         // The play endpoint hands back a loopback URL; the player relies on it being
         // seekable, so Range support is part of the contract.

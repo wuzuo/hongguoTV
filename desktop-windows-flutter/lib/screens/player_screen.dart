@@ -65,9 +65,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _seamlessTimer;
   int _preloadedIndex = -1;
 
+  // Mini player: the same window shrunk to a small always-on-top frame instead of a
+  // second window, because the mpv render surface belongs to this Flutter view.
+  bool _mini = false;
+  Size? _savedSize;
+  Offset? _savedPosition;
+  bool _savedMaximized = false;
+
   // Danmaku state.
   List<TimedComment> _danmaku = const [];
   int _danmakuLoadedUntil = 0;
+  int _danmakuGeneration = 0;
   bool _danmakuLoading = false;
   bool _danmakuEnabled = true;
 
@@ -80,7 +88,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _subscriptions = [
       _player.stream.position.listen((value) {
         if (!mounted) return;
-        setState(() => _position = value);
+        // A seek (or resume) can jump seconds at a time; discard danmaku windows from
+        // the old position so loading resumes around the new one instead of stalling.
+        final jump = (value.inMilliseconds - _position.inMilliseconds).abs();
+        setState(() {
+          _position = value;
+          if (jump > 5000) {
+            _danmaku = const [];
+            _danmakuGeneration += 1;
+            _danmakuLoadedUntil = value.inMilliseconds ~/ 30000 * 30000;
+          }
+        });
         if (_danmakuEnabled && value.inMilliseconds > _danmakuLoadedUntil - 15000) {
           unawaited(_loadDanmaku());
         }
@@ -118,8 +136,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
-    unawaited(_player.dispose());
+    // Restore the window chrome before tearing down the render surface.
     if (_fullscreen) unawaited(windowManager.setFullScreen(false));
+    if (_mini) {
+      // Leaving the player from mini mode must not strand the next screen at 420x260
+      // or above every other window.
+      unawaited(windowManager.setAlwaysOnTop(false));
+      unawaited(windowManager.setMinimumSize(const Size(1080, 700)));
+      unawaited(windowManager.setTitle('果映 TV'));
+    }
+    unawaited(_player.dispose());
     super.dispose();
   }
 
@@ -135,6 +161,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (widget.detail.episodes.isEmpty) return;
     final target = index.clamp(0, widget.detail.episodes.length - 1);
     final generation = ++_generation;
+    final resumeMs = (position * 1000).round();
     _saveProgress();
     _hideTimer?.cancel();
     _seamlessTimer?.cancel();
@@ -152,7 +179,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _duration = Duration.zero;
       _buffer = Duration.zero;
       _danmaku = const [];
-      _danmakuLoadedUntil = 0;
+      _danmakuGeneration += 1;
+      _danmakuLoadedUntil = resumeMs > 30000 ? resumeMs ~/ 30000 * 30000 : 0;
     });
     if (seamless) {
       _seamlessTimer = Timer(const Duration(milliseconds: 700), () {
@@ -165,10 +193,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         quality: widget.session.store.quality,
       );
       if (!mounted || generation != _generation) return;
-      setState(() {
-        _actualQuality = result.quality;
-        _danmakuLoadedUntil = 0;
-      });
+      setState(() => _actualQuality = result.quality);
       await _player.open(
         Media(
           result.url,
@@ -185,7 +210,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _seamless = false;
         _seamlessSlow = false;
       });
-      unawaited(_loadDanmaku(reset: true));
+      unawaited(_loadDanmaku());
     } catch (problem) {
       _seamlessTimer?.cancel();
       if (!mounted || generation != _generation) return;
@@ -217,26 +242,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Future<void> _loadDanmaku({bool reset = false}) async {
+  Future<void> _loadDanmaku() async {
     if (!_danmakuEnabled || _danmakuLoading || _episodeId.isEmpty) return;
-    if (!reset && _position.inMilliseconds < _danmakuLoadedUntil - 3000) return;
+    final total = _duration.inMilliseconds;
+    // Duration arrives shortly after `open`; without it the request cannot describe the
+    // episode, so wait for the next position tick instead of sending a made-up length.
+    if (total <= 0) return;
+    final start = _danmakuLoadedUntil;
+    if (_position.inMilliseconds < start - 3000) return;
+    if (start >= total) return;
     _danmakuLoading = true;
+    final ticket = _danmakuGeneration;
     final episode = _episodeId;
-    final start = reset ? 0 : _danmakuLoadedUntil;
+    // The bridge expects the *episode* length here, not the length of the requested
+    // window. Passing a fixed 60 s made every page after the first minute invalid, so
+    // danmaku silently stopped loading for the rest of the episode.
+    final duration = total > start ? total : start + 60000;
     try {
       final page = await widget.session.api.danmaku(
         widget.detail.series.id,
         episode,
         startMs: start,
-        durationMs: 60000,
+        durationMs: duration,
       );
-      if (!mounted || episode != _episodeId) return;
+      if (!mounted || episode != _episodeId || ticket != _danmakuGeneration) return;
       setState(() {
-        if (reset) {
-          _danmaku = page.items;
-        } else {
-          _danmaku = [..._danmaku, ...page.items];
-        }
+        // Only the last half minute can still be on screen; keeping every page for a
+        // 90-minute episode would grow without bound.
+        final cutoff = _position.inMilliseconds - 30000;
+        final kept = _danmaku.where((item) => item.timeMs >= cutoff).toList();
+        _danmaku = [...kept, ...page.items];
         _danmakuLoadedUntil = page.nextMs > start ? page.nextMs : start + 60000;
       });
     } catch (_) {
@@ -301,8 +336,79 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _toggleFullscreen() async {
+    if (_mini) return;
     setState(() => _fullscreen = !_fullscreen);
     await windowManager.setFullScreen(_fullscreen);
+  }
+
+  /// Shrinks this window into an always-on-top mini player and back. The video is
+  /// rendered by this Flutter view, so a second real window would need its own player.
+  Future<void> _setMini(bool value) async {
+    if (_mini == value) return;
+    if (value) {
+      if (_fullscreen) await _toggleFullscreen();
+      try {
+        _savedMaximized = await windowManager.isMaximized();
+        if (_savedMaximized) {
+          await windowManager.unmaximize();
+          // Let Windows settle the restored bounds before reading them.
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+        }
+        _savedSize = await windowManager.getSize();
+        _savedPosition = await windowManager.getPosition();
+        await windowManager.setMinimumSize(const Size(300, 180));
+        await windowManager.setSize(const Size(420, 258));
+        await windowManager.setAlignment(Alignment.bottomRight);
+        await windowManager.setAlwaysOnTop(true);
+        await windowManager.setTitle('${widget.detail.series.title} · 迷你播放');
+      } catch (_) {
+        // Window management is cosmetic; keep playing if a platform call fails.
+      }
+      if (!mounted) return;
+      setState(() {
+        _mini = true;
+        _controlsVisible = false;
+        _episodePanel = false;
+      });
+    } else {
+      try {
+        await windowManager.setAlwaysOnTop(false);
+        await windowManager.setTitle('果映 TV');
+        await windowManager.setMinimumSize(const Size(1080, 700));
+        final size = _savedSize;
+        final position = _savedPosition;
+        if (size != null) await windowManager.setSize(size);
+        if (position != null) await windowManager.setPosition(position);
+        if (_savedMaximized) await windowManager.maximize();
+      } catch (_) {
+        // Keep the app usable even if the window manager rejects a call.
+      }
+      if (!mounted) return;
+      setState(() => _mini = false);
+    }
+  }
+
+  /// Leaves the player and returns to the detail page. `maybePop` on its own can be a
+  /// no-op outside a pushed route, so the pop is explicit and mini mode is restored first.
+  Future<void> _exitPlayer() async {
+    if (_mini) await _setMini(false);
+    // Leave fullscreen while the video surface is still alive; toggling it during
+    // `dispose` races the player teardown on Windows.
+    if (_fullscreen) await _toggleFullscreen();
+    unawaited(_player.pause());
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      await navigator.maybePop();
+    }
+  }
+
+  Future<void> _handleEscape() async {
+    if (_mini) return _setMini(false);
+    if (_fullscreen) return _toggleFullscreen();
+    await _exitPlayer();
   }
 
   Future<void> _changeQuality(int value) async {
@@ -327,48 +433,125 @@ class _PlayerScreenState extends State<PlayerScreen> {
           bindings: {
             const SingleActivator(LogicalKeyboardKey.space): () {
               _togglePlay();
-              _showControls();
+              if (!_mini) _showControls();
             },
             const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _seekRelative(-10),
             const SingleActivator(LogicalKeyboardKey.arrowRight): () => _seekRelative(10),
             const SingleActivator(LogicalKeyboardKey.keyF): _toggleFullscreen,
-            const SingleActivator(LogicalKeyboardKey.escape): () {
-              if (_fullscreen) {
-                unawaited(_toggleFullscreen());
-              } else {
-                Navigator.of(context).maybePop();
-              }
-            },
+            const SingleActivator(LogicalKeyboardKey.escape): () => unawaited(_handleEscape()),
           },
           child: Focus(
             autofocus: true,
-            child: MouseRegion(
-              onHover: (_) => _showControls(),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _videoLayer(),
-                  if (_loading) _loadingLayer(),
-                  if (!_loading && _seamless && _seamlessSlow) _seamlessSpinner(),
-                  if (_error != null) _errorLayer(),
-                  _controlsLayer(episodeCount),
-                  if (_episodePanel) _episodePanelLayer(),
-                ],
-              ),
-            ),
+            child: _mini ? _miniPlayer() : _fullPlayer(episodeCount),
           ),
         ),
       ),
     );
   }
 
-  Widget _videoLayer() => AnimatedOpacity(
+  Widget _fullPlayer(int episodeCount) => MouseRegion(
+    onHover: (_) => _showControls(),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        _videoLayer(),
+        if (_loading) _loadingLayer(),
+        if (!_loading && _seamless && _seamlessSlow) _seamlessSpinner(),
+        if (_error != null) _errorLayer(),
+        _controlsLayer(episodeCount),
+        if (_episodePanel) _episodePanelLayer(),
+      ],
+    ),
+  );
+
+  Widget _miniPlayer() => Stack(
+    fit: StackFit.expand,
+    children: [
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onDoubleTap: () => unawaited(_setMini(false)),
+        onPanStart: (_) => unawaited(windowManager.startDragging()),
+        child: _videoLayer(danmaku: false),
+      ),
+      if (_loading) _loadingLayer(),
+      if (!_loading && _seamless && _seamlessSlow) _seamlessSpinner(),
+      if (_error != null) _errorLayer(),
+      _miniOverlay(),
+    ],
+  );
+
+  Widget _miniOverlay() {
+    final scheme = AppTheme.dark.colorScheme;
+    final total = _duration.inMilliseconds;
+    return Stack(
+      children: [
+        if (total > 0)
+          Align(
+            alignment: Alignment.topCenter,
+            child: LinearProgressIndicator(
+              value: (_position.inMilliseconds / total).clamp(0.0, 1.0),
+              minHeight: 2,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation(scheme.primary),
+            ),
+          ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(4, 14, 2, 2),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x00000000), Color(0xD9000000)],
+              ),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: _playing ? '暂停' : '播放',
+                  onPressed: _togglePlay,
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 22,
+                  icon: Icon(_playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                ),
+                Expanded(
+                  child: Text(
+                    '第 ${_index + 1} 集 · ${widget.detail.series.title}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '还原播放器',
+                  onPressed: () => unawaited(_setMini(false)),
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  icon: const Icon(Icons.open_in_full, color: Colors.white),
+                ),
+                IconButton(
+                  tooltip: '关闭迷你播放',
+                  onPressed: () => unawaited(_exitPlayer()),
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _videoLayer({bool danmaku = true}) => AnimatedOpacity(
     opacity: _error == null ? 1 : 0,
     duration: const Duration(milliseconds: 200),
     child: Video(
       controller: _controller,
       fit: BoxFit.contain,
-      controls: (state) => _danmakuEnabled
+      controls: (state) => danmaku && _danmakuEnabled
           ? DanmakuLayer(
               comments: _danmaku,
               positionMs: _position.inMilliseconds,
@@ -429,7 +612,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               children: [
                 FilledButton(onPressed: () => _play(_index), child: const Text('重试')),
                 const SizedBox(width: 12),
-                TextButton(onPressed: () => Navigator.of(context).maybePop(), child: const Text('返回')),
+                TextButton(onPressed: () => unawaited(_exitPlayer()), child: const Text('返回')),
               ],
             ),
           ],
@@ -486,10 +669,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         padding: const EdgeInsets.fromLTRB(8, 8, 16, 0),
         child: Row(
           children: [
-            IconButton(
-              tooltip: '返回',
-              onPressed: () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
+            TextButton.icon(
+              onPressed: () => unawaited(_exitPlayer()),
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              icon: const Icon(Icons.arrow_back, size: 20),
+              label: const Text('返回'),
             ),
             const SizedBox(width: 4),
             Expanded(
@@ -508,6 +692,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: '迷你播放',
+              onPressed: () => unawaited(_setMini(true)),
+              icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white),
             ),
             IconButton(
               tooltip: _danmakuEnabled ? '关闭弹幕' : '开启弹幕',
@@ -855,7 +1044,7 @@ class DanmakuLayer extends StatefulWidget {
   final int positionMs;
   final bool playing;
 
-  static const travelMs = 8000;
+  static const travelMs = 10000;
 
   @override
   State<DanmakuLayer> createState() => _DanmakuLayerState();
@@ -911,16 +1100,17 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          const lanes = 2;
+          const lanes = 3;
           final laneHeight = 28.0;
           final visible = <Widget>[];
-          for (var index = 0; index < widget.comments.length; index++) {
-            final item = widget.comments[index];
+          for (final item in widget.comments) {
             final elapsed = positionMs - item.timeMs;
             if (elapsed < 0 || elapsed > DanmakuLayer.travelMs) continue;
             final progress = elapsed / DanmakuLayer.travelMs;
             final x = width - (width + 320) * progress;
-            final lane = index % lanes;
+            // A time bucket keeps a comment in the same lane even when older pages are
+            // pruned from the front of the list (an index-based lane would jump).
+            final lane = (item.timeMs ~/ 2000) % lanes;
             visible.add(
               Positioned(
                 left: x,
