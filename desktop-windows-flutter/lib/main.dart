@@ -132,8 +132,23 @@ class _GuoyingAppState extends State<GuoyingApp> with WindowListener {
 
   @override
   Future<void> onWindowClose() async {
-    await _bridge?.close();
-    await windowManager.destroy();
+    // Windows flags a window as "not responding" while it is still visible and the video
+    // engine / helper JVM tear down, which can take several seconds after playback. Hide the
+    // window first, stop the helper with bounded waits, then end the process directly instead
+    // of waiting for the Flutter engine's own shutdown.
+    final bridge = _bridge;
+    _bridge = null;
+    try {
+      await windowManager.hide().timeout(const Duration(milliseconds: 800));
+    } catch (_) {
+      // Hiding is cosmetic; keep closing even if the platform call stalls.
+    }
+    try {
+      await bridge?.close().timeout(const Duration(seconds: 3));
+    } catch (_) {
+      // Exiting regardless; Bridge.close already kills the helper before it can time out.
+    }
+    exit(0);
   }
 
   @override

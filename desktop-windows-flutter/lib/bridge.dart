@@ -131,17 +131,35 @@ class Bridge {
     }
   }
 
+  /// Stops the helper JVM.
+  ///
+  /// Every step is bounded on purpose: the window may already be closing, and a wedged pipe
+  /// or file flush would leave the app hanging in Task Manager. The JVM is killed before the
+  /// log is flushed, so it always dies even when the pipes stop responding.
   Future<void> close() async {
     _client.close();
     try {
-      await _process.stdin.close();
+      await _process.stdin.close().timeout(const Duration(milliseconds: 200));
     } catch (_) {
-      // The bridge may already have exited.
+      // The bridge may already have exited, or the pipe is wedged; kill it below.
     }
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    _process.kill();
-    await _log.flush().catchError((_) {});
-    await _log.close().catchError((_) {});
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    try {
+      _process.kill();
+    } catch (_) {
+      // Already gone.
+    }
+    try {
+      _log.writeln('--- closed ${DateTime.now().toIso8601String()} ---');
+      await _log.flush().timeout(const Duration(milliseconds: 400));
+    } catch (_) {
+      // Logging must never hold up shutdown.
+    }
+    try {
+      await _log.close().timeout(const Duration(milliseconds: 400));
+    } catch (_) {
+      // Same as above.
+    }
   }
 
   static String _appRoot() {
