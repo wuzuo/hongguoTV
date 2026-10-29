@@ -149,21 +149,61 @@ class TvSocial(
         }
     }
 
-    private fun label(text: String, size: Float = 18f) =
+    private fun label(text: String, size: Float = 18f, color: Int = TvStyle.text) =
         TextView(activity).apply {
             this.text = text
             textSize = size
-            setTextColor(TvStyle.text)
+            setTextColor(color)
+            includeFontPadding = false
             setPadding(dp(12), dp(9), dp(12), dp(9))
         }
 
+    /** 弹窗内按钮：与全站同一套三台阶（凸起 / 按进去 / 打亮）。 */
     private fun button(text: String, action: () -> Unit) =
         label(text).apply {
+            id = View.generateViewId()
+            gravity = Gravity.CENTER
             isFocusable = true
             isFocusableInTouchMode = true
-            minHeight = dp(48)
-            background = TvStyle.card(activity, false)
-            setOnFocusChangeListener { _, focus -> background = TvStyle.card(activity, focus) }
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            setPadding(
+                dp(14 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(14 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
+            background = TvStyle.soft(
+                activity,
+                TvStyle.surface,
+                TvStyle.RADIUS_PILL,
+                TvStyle.SOFT_BAND,
+                SoftStyle.RAISED,
+            )
+            setOnFocusChangeListener { view, focus ->
+                background =
+                    when {
+                        focus ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.lit,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                                glow = TvStyle.litGlow,
+                                depth = 1.2f,
+                            )
+                        else ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.surface,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                            )
+                    }
+                setTextColor(if (focus) TvStyle.onLit else TvStyle.text)
+                TvStyle.focus(view, focus)
+            }
             setOnClickListener { action() }
         }
 
@@ -173,10 +213,18 @@ class TvSocial(
         val body =
             LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(18), dp(12), dp(18), dp(12))
-                setBackgroundColor(TvStyle.background)
+                setPadding(dp(26), dp(22), dp(26), dp(22))
+                background =
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.surfaceHigh,
+                        TvStyle.RADIUS_DIALOG,
+                        TvStyle.SOFT_BAND_LARGE,
+                        SoftStyle.RAISED,
+                        depth = 1.1f,
+                    )
             }
-        body.addView(label("弹幕设置", 22f))
+        body.addView(label("弹幕设置", 22f, TvStyle.textStrong))
         fun option(title: () -> String, action: () -> Unit) {
             lateinit var b: TextView
             b =
@@ -191,7 +239,10 @@ class TvSocial(
                     )
                     overlay?.invalidate()
                 }
-            body.addView(b)
+            body.addView(
+                b,
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(TvStyle.GAP_INLINE) },
+            )
         }
         option({ "弹幕：${if(prefs.getBoolean("enabled",true)) "开" else "关"}" }) {
             prefs.edit().putBoolean("enabled", !prefs.getBoolean("enabled", true)).apply()
@@ -214,14 +265,19 @@ class TvSocial(
             button("重新读取弹幕") {
                 reset()
                 d.dismiss()
-            }
+            },
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(TvStyle.GAP_INLINE) },
         )
-        body.addView(label("真实时间轴弹幕；无内容时不使用普通评论代替。", 14f))
-        body.addView(button("关闭") { d.dismiss() })
+        body.addView(label("真实时间轴弹幕；无内容时不使用普通评论代替。", 14f, TvStyle.muted))
+        body.addView(
+            button("关闭") { d.dismiss() },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
+        )
         d.setContentView(body)
         d.setOnDismissListener { if (anchor.isAttachedToWindow) anchor.requestFocus() }
+        d.window?.setBackgroundDrawableResource(android.R.color.transparent)
         d.show()
-        d.window?.setLayout(dp(440), -2)
+        d.window?.setLayout(dp(520), -2)
         body.getChildAt(1).requestFocus()
     }
 
@@ -248,13 +304,24 @@ class TvSocial(
         val body =
             LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(12), dp(16), dp(12))
-                setBackgroundColor(TvStyle.background)
+                setPadding(dp(22), dp(20), dp(22), dp(20))
+                background =
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.surfaceHigh,
+                        TvStyle.RADIUS_DIALOG,
+                        TvStyle.SOFT_BAND_LARGE,
+                        SoftStyle.RAISED,
+                        depth = 1.1f,
+                    )
             }
-        body.addView(label("评论与剧评", 22f))
+        body.addView(label("评论与剧评", 22f, TvStyle.textStrong))
         val tabs = LinearLayout(activity)
-        body.addView(tabs)
-        val status = label("匿名读取 · 点赞数量只读", 14f)
+        body.addView(
+            tabs,
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
+        )
+        val status = label("匿名读取 · 点赞数量只读", 14f, TvStyle.muted)
         body.addView(status)
         val scroll = ScrollView(activity)
         val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -277,11 +344,17 @@ class TvSocial(
                     orientation = LinearLayout.VERTICAL
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    setPadding(dp(12), dp(10), dp(12), dp(12))
+                    setPadding(
+                        dp(8 + TvStyle.SOFT_BAND),
+                        dp(6 + TvStyle.SOFT_BAND),
+                        dp(8 + TvStyle.SOFT_BAND),
+                        dp(8 + TvStyle.SOFT_BAND),
+                    )
                     background = TvStyle.card(activity, false)
                     contentDescription = "$author，$content"
-                    setOnFocusChangeListener { _, focused ->
+                    setOnFocusChangeListener { view, focused ->
                         background = TvStyle.card(activity, focused)
+                        TvStyle.focus(view, focused, 1.02f)
                     }
                 }
             card.addView(
@@ -306,8 +379,12 @@ class TvSocial(
                         .create()
                 expanded.setOnDismissListener { if (card.isAttachedToWindow) card.requestFocus() }
                 expanded.show()
+                decorateDialog(expanded)
             }
-            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            list.addView(
+                card,
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(TvStyle.GAP_INLINE) },
+            )
         }
         read = {
             if (!busy && more && !disposed) {
@@ -386,11 +463,20 @@ class TvSocial(
             read()
         }
         tabs.addView(button("本集评论") { select(false) }, LinearLayout.LayoutParams(0, -2, 1f))
-        tabs.addView(button("整剧剧评") { select(true) }, LinearLayout.LayoutParams(0, -2, 1f))
+        tabs.addView(
+            button("整剧剧评") { select(true) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(TvStyle.GAP_INLINE) },
+        )
         load = button("加载更多评论") { read() }
-        body.addView(load)
-        body.addView(label("上下浏览，到底继续加载。发送、回复未接入。", 13f))
-        body.addView(button("关闭") { d.dismiss() })
+        body.addView(
+            load,
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
+        )
+        body.addView(label("上下浏览，到底继续加载。发送、回复未接入。", 13f, TvStyle.muted))
+        body.addView(
+            button("关闭") { d.dismiss() },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
+        )
         scroll.setOnScrollChangeListener { _: View, _: Int, y: Int, _: Int, _: Int ->
             if (!reviewMode && y > 0 && y + scroll.height >= list.height - dp(80)) read()
         }

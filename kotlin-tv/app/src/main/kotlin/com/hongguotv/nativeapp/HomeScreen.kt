@@ -20,7 +20,7 @@ class SeriesPreview(context: Context) : LinearLayout(context) {
         }
 
     private val title =
-        label(27f, TvStyle.text).apply {
+        label(27f, TvStyle.textStrong).apply {
             minLines = 1
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -115,6 +115,27 @@ class HomeScreen(
 
     private fun shape(focus: Boolean) = TvStyle.card(context, focus)
 
+    /** 胶囊按钮：常态凸起 / 焦点打亮。分区的刷新、更多都用它。 */
+    private fun pill(focused: Boolean) =
+        if (focused)
+            TvStyle.soft(
+                context,
+                TvStyle.lit,
+                TvStyle.RADIUS_PILL,
+                TvStyle.SOFT_BAND,
+                SoftStyle.RAISED,
+                glow = TvStyle.litGlow,
+                depth = 1.2f,
+            )
+        else
+            TvStyle.soft(
+                context,
+                TvStyle.surface,
+                TvStyle.RADIUS_PILL,
+                TvStyle.SOFT_BAND,
+                SoftStyle.RAISED,
+            )
+
     private fun label(value: String, size: Float, color: Int = TvStyle.text) =
         TextView(context).apply {
             text = value
@@ -139,16 +160,24 @@ class HomeScreen(
     private var restoring = false
     private var revision = 0
     val refresh =
-        label("正在更新热门…", 13f).apply {
+        label("正在更新热门…", 13f, TvStyle.textDim).apply {
             id = View.generateViewId()
             tag = "home:refresh"
             isFocusable = true
             isFocusableInTouchMode = true
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = shape(false)
-            setOnFocusChangeListener { _, f ->
-                background = shape(f)
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            setPadding(
+                dp(16 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(16 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
+            background = pill(false)
+            setOnFocusChangeListener { view, f ->
+                background = pill(f)
+                setTextColor(if (f) TvStyle.onLit else TvStyle.textDim)
+                TvStyle.focus(view, f)
                 if (f) lastFocus = tag.toString()
             }
         }
@@ -256,7 +285,9 @@ class HomeScreen(
                     LayoutParams(dp(3), dp(14)).apply { rightMargin = dp(8) },
                 )
                 heading.addView(
-                    label(shelf.title, 16f).apply { setTypeface(null, Typeface.BOLD) },
+                    label(shelf.title, 17f, TvStyle.textStrong).apply {
+                        setTypeface(null, Typeface.BOLD)
+                    },
                     LayoutParams(0, -2, 1f),
                 )
                 heading.addView(label("左右选剧  ·  上下切换分区", 10f, TvStyle.muted))
@@ -290,25 +321,27 @@ class HomeScreen(
                             tag = key
                             isFocusable = true
                             isFocusableInTouchMode = true
-                            setPadding(dp(4), dp(4), dp(4), dp(8))
+                            setPadding(dp(6), dp(6), dp(6), dp(9))
                             background = shape(false)
                         }
                     val image =
                         if (entry != null)
                             ImageView(context).apply {
-                                scaleType = ImageView.ScaleType.FIT_CENTER
+                                scaleType = ImageView.ScaleType.CENTER_CROP
                                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                                roundClip(TvStyle.RADIUS_POSTER)
                             }
                         else null
                     view.addView(
-                        image ?: label("›", 36f).apply { gravity = Gravity.CENTER },
-                        LayoutParams(-1, ((width - dp(8)) / TvStyle.POSTER_ASPECT).toInt()),
+                        image ?: label("›", 36f, TvStyle.muted).apply { gravity = Gravity.CENTER },
+                        LayoutParams(-1, ((width - dp(12)) / TvStyle.POSTER_ASPECT).toInt()),
                     )
                     val title =
-                        label(entry?.series?.title ?: "查看全部", 14f).apply {
+                        label(entry?.series?.title ?: "查看全部", 14f, TvStyle.text).apply {
                             minLines = 2
                             maxLines = 2
                             ellipsize = TextUtils.TruncateAt.END
+                            setTypeface(null, Typeface.BOLD)
                             setPadding(dp(3), dp(5), dp(3), 0)
                         }
                     val badge =
@@ -326,6 +359,8 @@ class HomeScreen(
                                 visibility = if (entry?.progress == null) INVISIBLE else VISIBLE
                                 progressTintList =
                                     android.content.res.ColorStateList.valueOf(accent)
+                                progressBackgroundTintList =
+                                    android.content.res.ColorStateList.valueOf(TvStyle.wellDeep)
                             }
                     view.addView(title)
                     view.addView(badge)
@@ -359,6 +394,7 @@ class HomeScreen(
                     }
                     view.setOnFocusChangeListener { _, focused ->
                         view.background = shape(focused)
+                        TvStyle.focus(view, focused, 1.02f)
                         if (focused) {
                             lastFocus = key
                             remember(key)
@@ -390,15 +426,23 @@ class HomeScreen(
         val footer = mutableListOf<View>(refresh)
         if (more != null) {
             val next =
-                label("更多热门  ›", 15f).apply {
+                label("更多热门  ›", 15f, TvStyle.textDim).apply {
                     id = View.generateViewId()
                     tag = "home:more"
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    setPadding(dp(12), dp(12), dp(12), dp(12))
-                    background = shape(false)
-                    setOnFocusChangeListener { _, f ->
-                        background = shape(f)
+                    minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+                    setPadding(
+                        dp(16 + TvStyle.SOFT_BAND),
+                        dp(TvStyle.SOFT_BAND),
+                        dp(16 + TvStyle.SOFT_BAND),
+                        dp(TvStyle.SOFT_BAND),
+                    )
+                    background = pill(false)
+                    setOnFocusChangeListener { view, f ->
+                        background = pill(f)
+                        setTextColor(if (f) TvStyle.onLit else TvStyle.textDim)
+                        TvStyle.focus(view, f)
                         if (f) lastFocus = tag.toString()
                     }
                     setOnClickListener { more() }
@@ -600,11 +644,11 @@ class HomeScreen(
                             view.measuredHeight + params.topMargin + params.bottomMargin
                         }
                 }
-            val desired = ((row.cards.first().view.width - dp(8)) / TvStyle.POSTER_ASPECT).toInt()
+            val desired = ((row.cards.first().view.width - dp(12)) / TvStyle.POSTER_ASPECT).toInt()
             val imageHeight =
                 minOf(
                     desired,
-                    (height - row.block.getChildAt(0).measuredHeight - textHeight - dp(8))
+                    (height - row.block.getChildAt(0).measuredHeight - textHeight - dp(12))
                         .coerceAtLeast(dp(48)),
                 )
             row.cards.forEach { card ->

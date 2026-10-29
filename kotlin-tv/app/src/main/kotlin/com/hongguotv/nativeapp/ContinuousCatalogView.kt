@@ -222,9 +222,21 @@ internal class ContinuousCatalogView(
             setTextColor(TvStyle.text)
             isFocusable = true
             isClickable = true
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            maxLines = 1
+            gravity = android.view.Gravity.CENTER
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            setPadding(
+                dp(18 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(18 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
             background = TvStyle.card(context, false)
-            setOnFocusChangeListener { _, focus -> background = TvStyle.card(context, focus) }
+            setOnFocusChangeListener { view, focus ->
+                background = TvStyle.card(context, focus)
+                setTextColor(if (focus) TvStyle.textStrong else TvStyle.text)
+                TvStyle.focus(view, focus)
+            }
             setOnClickListener { click() }
         }
 
@@ -371,23 +383,24 @@ internal class ContinuousCatalogView(
 internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
     val image =
         ImageView(context).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
+            scaleType = ImageView.ScaleType.CENTER_CROP
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
     private val poster = FrameLayout(context)
     private val rank =
         TextView(context).apply {
             textSize = 13f
-            setTextColor(TvStyle.text)
+            setTextColor(TvStyle.playerText)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             val density = resources.displayMetrics.density
             setPadding(
-                (6 * density).toInt(),
-                (3 * density).toInt(),
-                (6 * density).toInt(),
-                (3 * density).toInt(),
+                (9 * density).toInt(),
+                (4 * density).toInt(),
+                (9 * density).toInt(),
+                (4 * density).toInt(),
             )
-            setBackgroundColor(Color.argb(200, 15, 18, 24))
+            background =
+                TvStyle.shape(context, 0xCC1A1A1A.toInt(), radius = TvStyle.RADIUS_PILL)
             visibility = GONE
         }
     private val title =
@@ -398,32 +411,39 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
             minLines = 2
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding((3 * resources.displayMetrics.density).toInt(), (6 * resources.displayMetrics.density).toInt(), 0, 0)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
     private val badge =
         TextView(context).apply {
             textSize = 12f
-            setTextColor(TvStyle.muted)
+            setTextColor(TvStyle.textDim)
             includeFontPadding = false
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding((3 * resources.displayMetrics.density).toInt(), (3 * resources.displayMetrics.density).toInt(), 0, 0)
         }
     private var preferredHeight = 0
 
     init {
         orientation = VERTICAL
         val density = resources.displayMetrics.density
-        setPadding(
-            (4 * density).toInt(),
-            (4 * density).toInt(),
-            (4 * density).toInt(),
-            (9 * density).toInt(),
-        )
-        val width = (resources.displayMetrics.widthPixels * .9f - 14 * density * 5) / 6
-        preferredHeight = (width / TvStyle.POSTER_ASPECT).toInt()
+        val band = (TvStyle.SOFT_BAND * density).toInt()
+        setPadding(band, band, band, (band + 3 * density).toInt())
+        val width = (resources.displayMetrics.widthPixels * .9f - band * 12) / 6
+        preferredHeight = ((width - band * 2) / TvStyle.POSTER_ASPECT).toInt()
+        poster.clipToOutline = true
+        poster.background =
+            TvStyle.shape(context, TvStyle.well, radius = TvStyle.RADIUS_POSTER, stroke = 0)
         poster.addView(image, FrameLayout.LayoutParams(-1, -1))
         poster.addView(
             rank,
-            FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.START),
+            FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.START)
+                .apply {
+                    val margin = (TvStyle.SOFT_BAND * resources.displayMetrics.density).toInt()
+                    leftMargin = margin
+                    topMargin = margin
+                },
         )
         addView(poster, LayoutParams(-1, preferredHeight))
         addView(title)
@@ -436,7 +456,7 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
         rank.text = position?.rank?.let { "第 $it 名" }.orEmpty()
         rank.visibility = if (position?.rank != null) VISIBLE else GONE
         rank.setTextColor(
-            if ((position?.rank ?: Int.MAX_VALUE) <= 3) TvStyle.accent else TvStyle.text
+            if ((position?.rank ?: Int.MAX_VALUE) <= 3) TvStyle.tips else TvStyle.playerText
         )
         contentDescription =
             listOf(

@@ -28,13 +28,15 @@ internal class TvSearchPanel(
             textSize = 15f
             setTextColor(TvStyle.text)
             setHintTextColor(TvStyle.muted)
+            includeFontPadding = false
             isSingleLine = true
             filters = arrayOf(InputFilter.LengthFilter(80))
             showSoftInputOnFocus = false
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
             setText(initial)
             setSelection(text.length)
-            background = TvStyle.card(context, false)
+            setPadding(dp(18), dp(TvStyle.SOFT_BAND), dp(18), dp(TvStyle.SOFT_BAND))
+            background = TvStyle.well(context, TvStyle.well, TvStyle.RADIUS_PILL, TvStyle.SOFT_BAND)
         }
     val results = LinearLayout(context).apply { orientation = VERTICAL }
     private val keys = mutableListOf<TextView>()
@@ -62,11 +64,38 @@ internal class TvSearchPanel(
             gravity = Gravity.CENTER
             isFocusable = true
             isClickable = true
-            minHeight = dp(36)
+            includeFontPadding = false
+            maxLines = 2
+            minimumHeight = dp(40)
             setTextColor(TvStyle.text)
-            setPadding(dp(4), dp(6), dp(4), dp(6))
-            background = TvStyle.card(context, false)
-            setOnFocusChangeListener { _, focused -> background = TvStyle.card(context, focused) }
+            setPadding(dp(6), dp(7), dp(6), dp(7))
+            fun paint(focused: Boolean) {
+                setTextColor(if (focused) TvStyle.onLit else TvStyle.text)
+                background =
+                    if (focused)
+                        TvStyle.soft(
+                            context,
+                            TvStyle.lit,
+                            TvStyle.RADIUS_POSTER,
+                            4,
+                            SoftStyle.RAISED,
+                            glow = TvStyle.litGlow,
+                            depth = 1.2f,
+                        )
+                    else
+                        TvStyle.soft(
+                            context,
+                            TvStyle.surface,
+                            TvStyle.RADIUS_POSTER,
+                            4,
+                            SoftStyle.RAISED,
+                        )
+            }
+            paint(false)
+            setOnFocusChangeListener { view, focused ->
+                paint(focused)
+                TvStyle.focus(view, focused, 1.04f)
+            }
             setOnClickListener(click)
         }
 
@@ -119,7 +148,7 @@ internal class TvSearchPanel(
             LayoutParams(dp(if (compact) 190 else 230), -1).apply { rightMargin = dp(14) },
         )
         left.addView(label("遥控器搜索", 18f))
-        left.addView(input, LayoutParams(-1, dp(42)))
+        left.addView(input, LayoutParams(-1, dp(48 + TvStyle.SOFT_BAND * 2)))
         val keyboard =
             LinearLayout(context).apply {
                 orientation = VERTICAL
@@ -132,7 +161,7 @@ internal class TvSearchPanel(
                 keys += key
                 line.addView(
                     key,
-                    LayoutParams(0, dp(34), 1f).apply {
+                    LayoutParams(0, dp(42), 1f).apply {
                         rightMargin = dp(3)
                         bottomMargin = dp(3)
                     },
@@ -164,7 +193,7 @@ internal class TvSearchPanel(
             row.forEach {
                 line.addView(
                     it,
-                    LayoutParams(0, dp(38), 1f).apply {
+                    LayoutParams(0, dp(48), 1f).apply {
                         rightMargin = dp(3)
                         bottomMargin = dp(3)
                     },

@@ -95,17 +95,21 @@ internal class SearchSuggestionsView(
                     id = View.generateViewId()
                     text = value
                     textSize = 13f
+                    includeFontPadding = false
+                    gravity = android.view.Gravity.CENTER
                     maxLines = if (vertical) 2 else 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     maxWidth = dp(300)
                     isFocusable = true
                     isClickable = true
                     setTextColor(TvStyle.text)
-                    setPadding(dp(12), dp(8), dp(12), dp(8))
-                    minHeight = dp(36)
+                    setPadding(dp(12), dp(7), dp(12), dp(7))
+                    minimumHeight = dp(40)
                     background = TvStyle.card(context, false)
-                    setOnFocusChangeListener { _, focus ->
+                    setOnFocusChangeListener { view, focus ->
                         background = TvStyle.card(context, focus)
+                        setTextColor(if (focus) TvStyle.textStrong else TvStyle.text)
+                        TvStyle.focus(view, focus, 1.04f)
                     }
                     setOnClickListener { search(value) }
                 }

@@ -59,11 +59,14 @@ internal class DiscoveryScreen(
         orientation = VERTICAL
         val bar = LinearLayout(context).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         bar.addView(types, LayoutParams(0, -2, 1f))
-        bar.addView(toggle)
-        bar.addView(reset)
-        bar.addView(refresh)
+        listOf(toggle, reset, refresh).forEach {
+            bar.addView(it, LayoutParams(-2, -2).apply { leftMargin = dp(6) })
+        }
         addView(bar)
-        addView(scroll, LayoutParams(-1, dp(200)))
+        scroll.setPadding(dp(10), dp(6), dp(10), dp(6))
+        scroll.background =
+            TvStyle.well(context, TvStyle.well, TvStyle.RADIUS_DIALOG, TvStyle.SOFT_BAND_LARGE)
+        addView(scroll, LayoutParams(-1, dp(206)))
         addView(summary)
         browser =
             ContinuousCatalogView(
@@ -151,21 +154,61 @@ internal class DiscoveryScreen(
             maxLines = 1
             isFocusable = true
             isClickable = true
-            setPadding(dp(10), dp(7), dp(10), dp(7))
-            minHeight = dp(34)
+            val band = 4
+            val density = resources.displayMetrics.density
+            setPadding(
+                (12 * density).toInt() + (band * density).toInt(),
+                (band * density).toInt() + (3 * density).toInt(),
+                (12 * density).toInt() + (band * density).toInt(),
+                (band * density).toInt() + (3 * density).toInt(),
+            )
+            minHeight = dp(44)
             fun paint() {
                 val selected = chosen()
+                val focused = hasFocus()
                 isSelected = selected
-                setTextColor(if (selected) TvStyle.accent else TvStyle.text)
+                setTextColor(
+                    when {
+                        focused -> TvStyle.onLit
+                        selected -> TvStyle.accent
+                        else -> TvStyle.text
+                    }
+                )
                 background =
-                    TvStyle.shape(
-                        context,
-                        if (selected) android.graphics.Color.rgb(61, 39, 34)
-                        else if (hasFocus()) TvStyle.raised else TvStyle.surface,
-                        if (hasFocus()) TvStyle.accent else android.graphics.Color.TRANSPARENT,
-                    )
+                    when {
+                        focused ->
+                            TvStyle.soft(
+                                context,
+                                TvStyle.lit,
+                                TvStyle.RADIUS_PILL,
+                                band,
+                                SoftStyle.RAISED,
+                                glow = TvStyle.litGlow,
+                                depth = 1.2f,
+                            )
+                        // 选中 = 按进去：凹凸对比完全由柔光表达，不带颜色。
+                        selected ->
+                            TvStyle.well(
+                                context,
+                                TvStyle.selectedWell,
+                                TvStyle.RADIUS_PILL,
+                                band,
+                                depth = 1.15f,
+                            )
+                        else ->
+                            TvStyle.soft(
+                                context,
+                                TvStyle.surface,
+                                TvStyle.RADIUS_PILL,
+                                band,
+                                SoftStyle.RAISED,
+                            )
+                    }
             }
-            setOnFocusChangeListener { _, _ -> paint() }
+            setOnFocusChangeListener { view, _ ->
+                paint()
+                TvStyle.focus(view, view.hasFocus(), 1.04f)
+            }
             setOnClickListener { action() }
             paint()
         }
@@ -227,10 +270,7 @@ internal class DiscoveryScreen(
                                 )
                         }
                         .apply {
-                            if (group.type != "genre") {
-                                minHeight = dp(28)
-                                setPadding(dp(10), dp(4), dp(10), dp(4))
-                            }
+                            if (group.type != "genre") minHeight = dp(40)
                         }
                 controls[group.type to option.id] = chip
                 choices.addView(chip, LayoutParams(-2, -2).apply { rightMargin = dp(5) })

@@ -38,7 +38,8 @@ class TvTools(private val activity: Activity) {
         TextView(activity).apply {
             text = value
             textSize = size
-            setTextColor(Color.WHITE)
+            setTextColor(TvStyle.text)
+            includeFontPadding = false
             setPadding(dp(8), dp(4), dp(8), dp(4))
         }
 
@@ -64,6 +65,7 @@ class TvTools(private val activity: Activity) {
             }
         }
         next.show()
+        decorateDialog(next)
     }
 
     fun close() {
@@ -155,17 +157,48 @@ class TvTools(private val activity: Activity) {
                         setPadding(dp(10), dp(10), dp(10), dp(10))
                         contentDescription = value
                         fun paint(focused: Boolean) {
-                            setTextColor(if (index == selected) TvStyle.accent else TvStyle.text)
+                            setTextColor(
+                                when {
+                                    focused -> TvStyle.onLit
+                                    index == selected -> TvStyle.accent
+                                    else -> TvStyle.text
+                                }
+                            )
                             background =
-                                TvStyle.shape(
-                                    activity,
-                                    if (index == selected) TvStyle.raised else TvStyle.surface,
-                                    if (focused) TvStyle.accent
-                                    else android.graphics.Color.TRANSPARENT,
-                                )
+                                when {
+                                    focused ->
+                                        TvStyle.soft(
+                                            activity,
+                                            TvStyle.lit,
+                                            TvStyle.RADIUS_POSTER,
+                                            TvStyle.SOFT_BAND,
+                                            SoftStyle.RAISED,
+                                            glow = TvStyle.litGlow,
+                                            depth = 1.2f,
+                                        )
+                                    index == selected ->
+                                        TvStyle.well(
+                                            activity,
+                                            TvStyle.selectedWell,
+                                            TvStyle.RADIUS_POSTER,
+                                            TvStyle.SOFT_BAND,
+                                            depth = 1.15f,
+                                        )
+                                    else ->
+                                        TvStyle.soft(
+                                            activity,
+                                            TvStyle.surface,
+                                            TvStyle.RADIUS_POSTER,
+                                            TvStyle.SOFT_BAND,
+                                            SoftStyle.RAISED,
+                                        )
+                                }
                         }
                         paint(false)
-                        setOnFocusChangeListener { _, focused -> paint(focused) }
+                        setOnFocusChangeListener { view, focused ->
+                            paint(focused)
+                            TvStyle.focus(view, focused, 1.04f)
+                        }
                         setOnClickListener {
                             next.dismiss()
                             onChoice(index)
@@ -173,14 +206,18 @@ class TvTools(private val activity: Activity) {
                     }
                 row.addView(
                     choice,
-                    LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-                        setMargins(dp(4), dp(4), dp(4), dp(4))
-                    },
+                    LinearLayout.LayoutParams(0, dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2), 1f)
+                        .apply {
+                            setMargins(dp(4), dp(4), dp(4), dp(4))
+                        },
                 )
                 choices += choice
             }
             repeat(4 - values.size) {
-                row.addView(View(activity), LinearLayout.LayoutParams(0, dp(46), 1f))
+                row.addView(
+                    View(activity),
+                    LinearLayout.LayoutParams(0, dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2), 1f),
+                )
             }
             list.addView(row)
         }
@@ -226,7 +263,7 @@ class TvTools(private val activity: Activity) {
             replace = false
             value.text = digits.ifEmpty { "—" }
         }
-        val buttons = mutableListOf<Button>()
+        val buttons = mutableListOf<TextView>()
         listOf(
                 listOf("1", "2", "3"),
                 listOf("4", "5", "6"),
@@ -237,15 +274,48 @@ class TvTools(private val activity: Activity) {
                 val row = LinearLayout(activity)
                 keys.forEach { key ->
                     val button =
-                        Button(activity).apply {
+                        TextView(activity).apply {
                             id = View.generateViewId()
                             text = key
-                            minHeight = dp(42)
-                            backgroundTintList =
-                                android.content.res.ColorStateList(
-                                    arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),
-                                    intArrayOf(Color.rgb(255, 99, 76), Color.rgb(31, 36, 47)),
-                                )
+                            textSize = 18f
+                            gravity = Gravity.CENTER
+                            includeFontPadding = false
+                            isFocusable = true
+                            isFocusableInTouchMode = true
+                            minimumHeight = dp(46 + TvStyle.SOFT_BAND * 2)
+                            setPadding(
+                                dp(10),
+                                dp(TvStyle.SOFT_BAND),
+                                dp(10),
+                                dp(TvStyle.SOFT_BAND),
+                            )
+                            fun paint(focused: Boolean) {
+                                setTextColor(if (focused) TvStyle.onLit else TvStyle.text)
+                                background =
+                                    if (focused)
+                                        TvStyle.soft(
+                                            activity,
+                                            TvStyle.lit,
+                                            TvStyle.RADIUS_POSTER,
+                                            TvStyle.SOFT_BAND,
+                                            SoftStyle.RAISED,
+                                            glow = TvStyle.litGlow,
+                                            depth = 1.2f,
+                                        )
+                                    else
+                                        TvStyle.soft(
+                                            activity,
+                                            TvStyle.surface,
+                                            TvStyle.RADIUS_POSTER,
+                                            TvStyle.SOFT_BAND,
+                                            SoftStyle.RAISED,
+                                        )
+                            }
+                            paint(false)
+                            setOnFocusChangeListener { view, focused ->
+                                paint(focused)
+                                TvStyle.focus(view, focused, 1.04f)
+                            }
                             setOnClickListener {
                                 when (key) {
                                     "清空" -> {

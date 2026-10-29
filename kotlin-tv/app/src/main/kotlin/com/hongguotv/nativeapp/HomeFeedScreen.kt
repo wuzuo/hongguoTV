@@ -52,9 +52,9 @@ internal class HomeFeedScreen(
     private var loading = false
     private var failed = false
     private val stage = FrameLayout(activity)
-    private val title = label("发现下一部好剧", 25f)
+    private val title = label("发现下一部好剧", 26f, TvStyle.textStrong)
     private val meta = label("第一集试播", 13f, TvStyle.accent)
-    private val intro = label("喜欢这部作品，就选择观看全集。", 15f, TvStyle.muted)
+    private val intro = label("喜欢这部作品，就选择观看全集。", 15f, TvStyle.textDim)
     private val status = label("正在准备热门作品…", 15f)
     private val tag = label("热门发现", 12f, TvStyle.accent)
     private val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -85,17 +85,78 @@ internal class HomeFeedScreen(
             isFocusableInTouchMode = true
             isClickable = true
             gravity = Gravity.CENTER
-            minHeight = dp(44)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            minWidth = dp(TvStyle.BUTTON_MIN_WIDTH)
+            setPadding(
+                dp(14 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(14 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
             background = TvStyle.card(activity, false)
-            setOnFocusChangeListener { _, _ -> paintButton(this) }
+            setOnFocusChangeListener { view, _ ->
+                paintButton(this)
+                TvStyle.focus(view, view.hasFocus())
+            }
             setOnClickListener { action() }
         }
 
+    /** 常态凸起、选中按进去、焦点打亮；与全站按钮同一套三个台阶。 */
     private fun paintButton(button: TextView) {
-        button.background = TvStyle.card(activity, button.hasFocus())
-        button.setTextColor(if (button.isSelected) TvStyle.accent else TvStyle.text)
-        button.setTypeface(null, if (button.isSelected) Typeface.BOLD else Typeface.NORMAL)
+        val focused = button.hasFocus()
+        button.background =
+            when {
+                focused ->
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.lit,
+                        TvStyle.RADIUS_PILL,
+                        TvStyle.SOFT_BAND,
+                        SoftStyle.RAISED,
+                        glow = TvStyle.litGlow,
+                        depth = 1.2f,
+                    )
+                button.isSelected ->
+                    TvStyle.well(
+                        activity,
+                        TvStyle.selectedWell,
+                        TvStyle.RADIUS_PILL,
+                        TvStyle.SOFT_BAND,
+                        depth = 1.15f,
+                    )
+                // 主操作（观看全集）常亮：一屏只有一个，焦点只是再加一圈光。
+                button === watchButton && button.isEnabled ->
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.lit,
+                        TvStyle.RADIUS_PILL,
+                        TvStyle.SOFT_BAND,
+                        SoftStyle.RAISED,
+                        depth = 1.1f,
+                    )
+                else ->
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.surface,
+                        TvStyle.RADIUS_PILL,
+                        TvStyle.SOFT_BAND,
+                        SoftStyle.RAISED,
+                    )
+            }
+        button.setTextColor(
+            when {
+                focused -> TvStyle.onLit
+                button.isSelected -> TvStyle.accent
+                button === watchButton && button.isEnabled -> TvStyle.onLit
+                else -> TvStyle.text
+            }
+        )
+        button.setTypeface(
+            null,
+            if (button.isSelected || focused) Typeface.BOLD else Typeface.NORMAL,
+        )
     }
 
     // 组装首页布局和点击事件；分类栏、内容区、操作栏按纵向排列。
@@ -127,7 +188,7 @@ internal class HomeFeedScreen(
         typeChoices.forEachIndexed { i, b ->
             types.addView(
                 b,
-                lp(0, dp(40)).apply {
+                lp(0, dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)).apply {
                     weight = 1f
                     rightMargin = dp(8)
                 },
@@ -137,29 +198,42 @@ internal class HomeFeedScreen(
             b.nextFocusLeftId = typeChoices.getOrNull(i - 1)?.id ?: b.id
             b.nextFocusRightId = typeChoices.getOrNull(i + 1)?.id ?: b.id
         }
-        addView(types, lp(-1, dp(48)))
+        addView(types, lp(-1, dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2 + 8)))
         val content = LinearLayout(activity)
+        content.clipChildren = false
+        content.clipToPadding = false
         stage.isFocusable = true
         stage.isFocusableInTouchMode = true
         stage.isClickable = true
-        stage.setPadding(dp(3), dp(3), dp(3), dp(3))
+        stage.setPadding(
+            dp(TvStyle.SOFT_BAND + 6),
+            dp(TvStyle.SOFT_BAND + 6),
+            dp(TvStyle.SOFT_BAND + 6),
+            dp(TvStyle.SOFT_BAND + 6),
+        )
         stage.background = TvStyle.card(activity, false)
+        stage.clipChildren = true
         stage.addView(playback.view, FrameLayout.LayoutParams(-1, -1))
-        tag.setPadding(dp(12), dp(8), dp(12), dp(8))
-        tag.background = TvStyle.shape(activity, Color.argb(210, 11, 15, 21))
+        tag.setPadding(dp(14), dp(7), dp(14), dp(7))
+        tag.background = TvStyle.shape(activity, 0xCC1A1A1A.toInt(), radius = TvStyle.RADIUS_PILL)
         stage.addView(
             tag,
             FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                setMargins(dp(10), dp(10), dp(10), 0)
+                setMargins(dp(TvStyle.SOFT_BAND + 10), dp(TvStyle.SOFT_BAND + 10), dp(10), 0)
             },
         )
         status.gravity = Gravity.CENTER
-        status.setPadding(dp(14), dp(12), dp(14), dp(12))
-        status.background = TvStyle.shape(activity, Color.argb(215, 11, 15, 21))
+        status.setPadding(dp(16), dp(11), dp(16), dp(11))
+        status.background = TvStyle.shape(activity, 0xCC1A1A1A.toInt(), radius = TvStyle.RADIUS_PILL)
         stage.addView(
             status,
             FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
-                setMargins(dp(10), 0, dp(10), dp(10))
+                setMargins(
+                    dp(TvStyle.SOFT_BAND + 10),
+                    0,
+                    dp(TvStyle.SOFT_BAND + 10),
+                    dp(TvStyle.SOFT_BAND + 10),
+                )
             },
         )
         content.addView(
@@ -215,7 +289,7 @@ internal class HomeFeedScreen(
         buttons.forEachIndexed { index, b ->
             actions.addView(
                 b,
-                lp(0, dp(44)).apply {
+                lp(0, dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)).apply {
                     weight = 1f
                     if (index < buttons.lastIndex) rightMargin = dp(10)
                 },
@@ -238,8 +312,9 @@ internal class HomeFeedScreen(
                     else if (state.category == DramaCategory.COMIC) comicButton else realButton)
                     .id
         }
-        stage.setOnFocusChangeListener { _, focused ->
+        stage.setOnFocusChangeListener { view, focused ->
             stage.background = TvStyle.card(activity, focused)
+            TvStyle.focus(view, focused, 1.01f)
         }
         stage.setOnClickListener { showActions() }
         stage.setOnKeyListener { _, key, event ->

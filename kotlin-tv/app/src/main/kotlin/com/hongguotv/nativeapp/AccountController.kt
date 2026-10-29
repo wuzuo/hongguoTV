@@ -392,10 +392,14 @@ class AccountController(private val activity: Activity, private val play: (Cloud
     fun progress(id: String): CloudProgress? =
         if (credentials != null) history.firstOrNull { it.series.id == id } else null
 
+    private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
+
     private fun showDialog(builder: AlertDialog.Builder) {
         dialog?.dismiss()
         dialog = builder.create()
         dialog?.show()
+        // 所有账号弹窗共用新拟态外壳：柔光底板 + 主题文字色。
+        dialog?.let { decorateDialog(it) }
     }
 
     fun show() {
@@ -564,14 +568,16 @@ class AccountController(private val activity: Activity, private val play: (Cloud
                 val panel =
                     android.widget.LinearLayout(activity).apply {
                         orientation = android.widget.LinearLayout.VERTICAL
-                        setPadding(24, 16, 24, 16)
+                        setPadding(dp(24), dp(16), dp(24), dp(16))
                         addView(image)
                         addView(
                             android.widget.TextView(activity).apply {
                                 text = "用手机红果 App：我的 → 右上角菜单 → 扫一扫\n扫码后请在手机确认登录"
-                                textSize = 18f
+                                textSize = 17f
                                 gravity = android.view.Gravity.CENTER
-                                setPadding(0, 12, 0, 0)
+                                setTextColor(TvStyle.textDim)
+                                includeFontPadding = false
+                                setPadding(0, dp(14), 0, 0)
                             }
                         )
                     }

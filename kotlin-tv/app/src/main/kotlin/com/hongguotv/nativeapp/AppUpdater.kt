@@ -192,6 +192,7 @@ class AppUpdater(private val activity: Activity, private val idle: () -> Boolean
             if (from?.isAttachedToWindow == true) from.requestFocus()
         }
         next.show()
+        decorateDialog(next)
         next.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             when {
                 ready -> install()

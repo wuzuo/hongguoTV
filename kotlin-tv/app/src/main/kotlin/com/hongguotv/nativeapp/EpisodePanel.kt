@@ -29,33 +29,73 @@ class EpisodePanel(
 
     private fun dp(n: Int) = (n * activity.resources.displayMetrics.density).toInt()
 
-    private fun label(value: String, size: Float = 17f) =
+    private fun label(value: String, size: Float = 17f, color: Int = TvStyle.text) =
         TextView(activity).apply {
             text = value
             textSize = size
-            setTextColor(TvStyle.text)
+            setTextColor(color)
+            includeFontPadding = false
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }
 
     private fun button(value: String, active: Boolean = false, action: () -> Unit) =
-        label(value, 16f).apply {
+        label(value, 15f).apply {
             id = View.generateViewId()
             gravity = Gravity.CENTER
-            minHeight = dp(46)
+            maxLines = 1
             isFocusable = true
             isFocusableInTouchMode = true
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            setPadding(
+                dp(10 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(10 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
             fun paint(focus: Boolean) {
+                setTextColor(
+                    when {
+                        focus -> TvStyle.onLit
+                        active -> TvStyle.accent
+                        else -> TvStyle.text
+                    }
+                )
                 background =
-                    GradientDrawable().apply {
-                        setColor(
-                            if (focus) TvStyle.accent
-                            else if (active) Color.rgb(61, 39, 34) else TvStyle.surface
-                        )
-                        cornerRadius = dp(6).toFloat()
+                    when {
+                        focus ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.lit,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                                glow = TvStyle.litGlow,
+                                depth = 1.2f,
+                            )
+                        // 当前集：按进去。
+                        active ->
+                            TvStyle.well(
+                                activity,
+                                TvStyle.selectedWell,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                depth = 1.15f,
+                            )
+                        else ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.surface,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                            )
                     }
             }
             paint(false)
-            setOnFocusChangeListener { _, hasFocus -> paint(hasFocus) }
+            setOnFocusChangeListener { view, hasFocus ->
+                paint(hasFocus)
+                TvStyle.focus(view, hasFocus)
+            }
             setOnClickListener { action() }
         }
 
@@ -84,10 +124,18 @@ class EpisodePanel(
         val content =
             LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                setBackgroundColor(TvStyle.background)
+                setPadding(dp(20), dp(18), dp(20), dp(18))
+                background =
+                    TvStyle.soft(
+                        activity,
+                        TvStyle.surfaceHigh,
+                        TvStyle.RADIUS_DIALOG,
+                        TvStyle.SOFT_BAND_LARGE,
+                        SoftStyle.RAISED,
+                        depth = 1.1f,
+                    )
             }
-        content.addView(label("选集  /  正在看第 ${current+1} 集", 20f))
+        content.addView(label("选集  /  正在看第 ${current+1} 集", 20f, TvStyle.textStrong))
         val actions = LinearLayout(activity)
         val close = button("关闭") { dismiss() }
         lateinit var jump: TextView
@@ -140,7 +188,7 @@ class EpisodePanel(
             )
         }
         content.addView(paging)
-        content.addView(label("第 ${group*20+1}—${minOf((group+1)*20,count)} 集 / 共 $count 集", 14f))
+        content.addView(label("第 ${group*20+1}—${minOf((group+1)*20,count)} 集 / 共 $count 集", 14f, TvStyle.muted))
         val scroll = ScrollView(activity)
         val grid = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(grid)

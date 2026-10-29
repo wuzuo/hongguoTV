@@ -22,7 +22,7 @@ internal class RankingScreen(
     private val load: (RankBoard, ((RankSnapshot?, String?) -> Unit)) -> Unit,
 ) : LinearLayout(activity) {
     private val controls = mutableListOf<TextView>()
-    private val heading = label("热播排行榜", 25f)
+    private val heading = label("热播排行榜", 26f, TvStyle.textStrong)
     private val subtitle = label("", 12f, TvStyle.muted)
     private val body = LinearLayout(activity).apply { orientation = VERTICAL }
     private var filterButton: TextView
@@ -48,19 +48,58 @@ internal class RankingScreen(
             id = View.generateViewId()
             isFocusable = true
             isClickable = true
+            maxLines = 1
             gravity = Gravity.CENTER
-            setPadding(dp(15), dp(10), dp(15), dp(10))
-            minHeight = dp(42)
+            minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+            setPadding(
+                dp(18 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+                dp(18 + TvStyle.SOFT_BAND),
+                dp(TvStyle.SOFT_BAND),
+            )
             fun paint() {
-                setTextColor(if (isSelected) TvStyle.accent else TvStyle.text)
+                val focused = hasFocus()
+                setTextColor(
+                    when {
+                        focused -> TvStyle.onLit
+                        isSelected -> TvStyle.accent
+                        else -> TvStyle.text
+                    }
+                )
                 background =
-                    TvStyle.shape(
-                        activity,
-                        if (isSelected) android.graphics.Color.rgb(48, 32, 29) else TvStyle.surface,
-                        if (hasFocus()) TvStyle.accent else android.graphics.Color.TRANSPARENT,
-                    )
+                    when {
+                        focused ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.lit,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                                glow = TvStyle.litGlow,
+                                depth = 1.2f,
+                            )
+                        isSelected ->
+                            TvStyle.well(
+                                activity,
+                                TvStyle.selectedWell,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                depth = 1.15f,
+                            )
+                        else ->
+                            TvStyle.soft(
+                                activity,
+                                TvStyle.surface,
+                                TvStyle.RADIUS_PILL,
+                                TvStyle.SOFT_BAND,
+                                SoftStyle.RAISED,
+                            )
+                    }
             }
-            setOnFocusChangeListener { _, _ -> paint() }
+            setOnFocusChangeListener { view, _ ->
+                paint()
+                TvStyle.focus(view, view.hasFocus())
+            }
             setOnClickListener { action() }
             paint()
         }
@@ -90,9 +129,8 @@ internal class RankingScreen(
                     }
             bar.addView(
                 control,
-                params().apply {
-                    width = dp(92)
-                    rightMargin = dp(8)
+                params(-2).apply {
+                    rightMargin = dp(10)
                 },
             )
             controls += control
@@ -123,15 +161,43 @@ internal class RankingScreen(
         RankBoard.entries.forEachIndexed { i, b ->
             controls[i].isSelected = state.board == b
             controls[i].text = b.label + if (state.isRefreshing(b)) " …" else ""
-            controls[i].setTextColor(if (state.board == b) TvStyle.accent else TvStyle.text)
+            val focused = controls[i].hasFocus()
+            controls[i].setTextColor(
+                when {
+                    focused -> TvStyle.onLit
+                    state.board == b -> TvStyle.accent
+                    else -> TvStyle.text
+                }
+            )
             controls[i].background =
-                TvStyle.shape(
-                    activity,
-                    if (state.board == b) android.graphics.Color.rgb(48, 32, 29)
-                    else TvStyle.surface,
-                    if (controls[i].hasFocus()) TvStyle.accent
-                    else android.graphics.Color.TRANSPARENT,
-                )
+                when {
+                    focused ->
+                        TvStyle.soft(
+                            activity,
+                            TvStyle.lit,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            SoftStyle.RAISED,
+                            glow = TvStyle.litGlow,
+                            depth = 1.2f,
+                        )
+                    state.board == b ->
+                        TvStyle.well(
+                            activity,
+                            TvStyle.selectedWell,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            depth = 1.15f,
+                        )
+                    else ->
+                        TvStyle.soft(
+                            activity,
+                            TvStyle.surface,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            SoftStyle.RAISED,
+                        )
+                }
         }
         refreshButton.text = if (state.isRefreshing(state.board)) "读取中…" else "刷新"
         heading.text = "${state.board.label}热播榜"

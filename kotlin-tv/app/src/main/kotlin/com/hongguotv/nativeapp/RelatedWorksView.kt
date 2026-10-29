@@ -26,7 +26,7 @@ internal class RelatedWorksView(
         TextView(context).apply {
             text = value
             textSize = size
-            setTextColor(Color.WHITE)
+            setTextColor(TvStyle.text)
             includeFontPadding = false
         }
 
@@ -50,10 +50,21 @@ internal class RelatedWorksView(
                 id = View.generateViewId()
                 isFocusable = true
                 isFocusableInTouchMode = true
-                setPadding(dp(14), dp(10), dp(14), dp(10))
+                gravity = Gravity.CENTER
+                minimumHeight = dp(TvStyle.BUTTON_COMPACT + TvStyle.SOFT_BAND * 2)
+                setPadding(
+                    dp(18 + TvStyle.SOFT_BAND),
+                    dp(TvStyle.SOFT_BAND),
+                    dp(18 + TvStyle.SOFT_BAND),
+                    dp(TvStyle.SOFT_BAND),
+                )
                 background = TvStyle.card(context, false)
                 setOnFocusChangeListener { view, focused ->
                     view.background = TvStyle.card(context, focused)
+                    (view as TextView).setTextColor(
+                        if (focused) TvStyle.textStrong else TvStyle.text
+                    )
+                    TvStyle.focus(view, focused)
                 }
                 setOnClickListener { reload() }
                 nextFocusUpId = upper.lastOrNull()?.id ?: id
@@ -64,7 +75,7 @@ internal class RelatedWorksView(
         if (status.isNotBlank())
             addView(
                 label(status, 13f).apply {
-                    setTextColor(Color.LTGRAY)
+                    setTextColor(TvStyle.muted)
                     setPadding(0, dp(8), 0, dp(8))
                 }
             )
@@ -100,10 +111,14 @@ internal class RelatedWorksView(
                         isFocusable = true
                         isFocusableInTouchMode = true
                         contentDescription = work.series.title + "，" + work.label
-                        setPadding(dp(5), dp(5), dp(5), dp(9))
+                        setPadding(dp(6), dp(6), dp(6), dp(9))
                         background = TvStyle.card(context, false)
                     }
-                val image = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+                val image =
+                    ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        roundClip(TvStyle.RADIUS_POSTER)
+                    }
                 card.addView(image, LayoutParams(-1, dp(176)))
                 loadCover(image, work.series.cover)
                 card.addView(
@@ -121,6 +136,7 @@ internal class RelatedWorksView(
                 card.setOnClickListener { open(work, card) }
                 card.setOnFocusChangeListener { view, focused ->
                     view.background = TvStyle.card(context, focused)
+                    TvStyle.focus(view, focused, 1.03f)
                     if (focused) {
                         loadCover(image, work.series.cover)
                         view.requestRectangleOnScreen(
