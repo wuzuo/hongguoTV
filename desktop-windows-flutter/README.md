@@ -75,7 +75,8 @@ flutter run -d windows
 ### 自动化测试
 
 - `flutter test` 默认只跑离线单元测试：数据模型与 `library.json` 字段兼容、封面 HEIC 回退地址、
-  DPAPI 加密与解密往返（真实调用 `CryptProtectData`，使用临时目录，不碰本机登录态）。
+  DPAPI 加密与解密往返（真实调用 `CryptProtectData`，使用临时目录，不碰本机登录态），
+  以及片单网格的卡片尺寸与行高（防止封面被放大或两行标题溢出）。
 - `test/live_bridge_test.dart` 是可选的本机联调测试，会真正启动 bridge 并依次请求首页、详情、
   相关作品、找剧、榜单、评论、弹幕与播放地址，同时校验视频端点支持 Range。需要先构建 bridge：
 
