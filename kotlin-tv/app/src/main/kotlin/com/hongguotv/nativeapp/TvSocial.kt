@@ -3,7 +3,6 @@ package com.hongguotv.nativeapp
 
 import android.app.Activity
 import android.app.Dialog
-import android.graphics.*
 import android.os.Handler
 import android.os.Looper
 import android.view.*
@@ -33,10 +32,35 @@ class TvSocial(
     private var commentScope: RequestScope? = null
     private var generation = 0
     private var dialog: Dialog? = null
-    private var overlay: BulletView? = null
+    private var overlay: DanmakuView? = null
     private var loading = false
     private var failedAt = 0L
     private val pages = linkedMapOf<Long, JSONObject>()
+
+    init {
+        migratePreferences()
+    }
+
+    /**
+     * 旧版本把弹幕设置存成「开关 + 字号 + 行数 + 速度毫秒」，现在换成
+     * 「显示方式 + 速度档位 + 字号缩放 + 透明度」。只迁移一次，迁完把旧键删掉。
+     */
+    private fun migratePreferences() {
+        if (!prefs.contains("enabled") && !prefs.contains("font")) return
+        val edit = prefs.edit()
+        if (!prefs.contains("mode")) {
+            val mode =
+                if (prefs.getBoolean("enabled", true)) DanmakuMode.FULL else DanmakuMode.HIDDEN
+            edit.putString("mode", mode.storedValue)
+            edit.putFloat("scale", DanmakuStyle.scale(prefs.getInt("font", 24) / 24f))
+        }
+        edit.remove("enabled").remove("font").remove("lanes").remove("travel").apply()
+    }
+
+    private fun mode() = DanmakuMode.fromStored(prefs.getString("mode", null))
+    private fun speed() = DanmakuSpeed.fromStored(prefs.getString("speed", null))
+    private fun scale() = DanmakuStyle.scale(prefs.getFloat("scale", 1f))
+    private fun alpha() = DanmakuStyle.alpha(prefs.getFloat("alpha", 1f))
 
     private fun dp(n: Int) = (n * activity.resources.displayMetrics.density).toInt()
 
@@ -50,12 +74,11 @@ class TvSocial(
                     key = next
                 }
                 val p = player()
-                overlay?.running = p?.isPlaying == true
                 overlay?.invalidate()
                 if (
                     p != null &&
                         next != null &&
-                        prefs.getBoolean("enabled", true) &&
+                        mode().showsStyle &&
                         !loading &&
                         p.duration in 1..86400000 &&
                         p.currentPosition < p.duration &&
@@ -82,7 +105,17 @@ class TvSocial(
 
     fun attach(root: android.widget.FrameLayout) {
         overlay?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
-        overlay = BulletView().also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        overlay =
+            DanmakuView(activity).also { view ->
+                view.positionMillis = { player()?.currentPosition ?: 0L }
+                view.playing = { player()?.isPlaying == true }
+                view.mode = mode()
+                view.speed = speed()
+                view.textScale = scale()
+                view.textAlpha = alpha()
+                root.addView(view, FrameLayout.LayoutParams(-1, -1))
+            }
+        publish()
     }
 
     fun foreground(value: Boolean) {
@@ -91,7 +124,6 @@ class TvSocial(
         if (value) main.post(tick)
         else {
             reset()
-            overlay?.running = false
             overlay?.invalidate()
         }
     }
@@ -105,7 +137,7 @@ class TvSocial(
         loading = false
         failedAt = 0
         pages.clear()
-        overlay?.setRows(emptyList())
+        overlay?.clear()
         dialog?.dismiss()
         dialog = null
         key = null
@@ -131,12 +163,7 @@ class TvSocial(
                     while (pages.size > 6) pages.remove(
                         pages.keys.maxBy { kotlin.math.abs(it - start) }
                     )
-                    val rows =
-                        pages.values.flatMap { value ->
-                            val a = value.getJSONArray("items")
-                            (0 until a.length()).map { a.getJSONObject(it) }
-                        }
-                    overlay?.setRows(rows)
+                    publish()
                 }
             } catch (_: Exception) {
                 main.post {
@@ -147,6 +174,30 @@ class TvSocial(
                 }
             }
         }
+    }
+
+    /**
+     * 把已经拿到的几页弹幕合成一份交给弹幕层。
+     *
+     * 窗口是 30 秒一段、最多留 6 页，相邻窗口在边界上会重复同一条，因此按 `id` 去重；
+     * 时间点缺失或文本为空的条目直接跳过。
+     */
+    private fun publish() {
+        val seen = mutableSetOf<String>()
+        val items = mutableListOf<Danmaku>()
+        pages.values.forEach { page ->
+            val rows = page.optJSONArray("items") ?: return@forEach
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                val id = row.optString("id")
+                if (id.isBlank() || !seen.add(id)) continue
+                val text = row.optString("text").trim()
+                val at = row.optLong("timeMS", -1)
+                if (text.isEmpty() || at < 0) continue
+                items += Danmaku(at, text)
+            }
+        }
+        overlay?.setDanmaku(items)
     }
 
     private fun label(text: String, size: Float = 18f, color: Int = TvStyle.text) =
@@ -207,6 +258,12 @@ class TvSocial(
             setOnClickListener { action() }
         }
 
+    /**
+     * 弹幕设置面板：显示方式与速度各一行单选，字号与透明度各一条滑条。
+     *
+     * 与参考实现一致，四项都即时生效（改完立刻能看到画面变化），不需要「保存」。
+     * 隐藏档下字号 / 透明度没有意义，两条滑条置灰并退出焦点。
+     */
     fun settings(anchor: View) {
         val d = Dialog(activity)
         d.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -224,51 +281,66 @@ class TvSocial(
                         depth = 1.1f,
                     )
             }
+        val scaleSlider =
+            DanmakuSlider.scale(activity, scale()) { value ->
+                prefs.edit().putFloat("scale", value).apply()
+                overlay?.textScale = value
+            }
+        val alphaSlider =
+            DanmakuSlider.alpha(activity, alpha()) { value ->
+                prefs.edit().putFloat("alpha", value).apply()
+                overlay?.textAlpha = value
+            }
+        fun syncSliders() {
+            val on = mode().showsStyle
+            scaleSlider.setEnabled(on)
+            alphaSlider.setEnabled(on)
+        }
+        val modeRow =
+            choices(
+                DanmakuMode.entries.map { it.label },
+                { DanmakuMode.entries.indexOf(mode()) },
+            ) { index ->
+                val value = DanmakuMode.entries[index]
+                prefs.edit().putString("mode", value.storedValue).apply()
+                overlay?.mode = value
+                syncSliders()
+            }
+        val speedRow =
+            choices(
+                DanmakuSpeed.entries.map { it.label },
+                { DanmakuSpeed.entries.indexOf(speed()) },
+            ) { index ->
+                val value = DanmakuSpeed.entries[index]
+                prefs.edit().putString("speed", value.storedValue).apply()
+                overlay?.speed = value
+            }
+        syncSliders()
+
         body.addView(label("弹幕设置", 22f, TvStyle.textStrong))
-        fun option(title: () -> String, action: () -> Unit) {
-            lateinit var b: TextView
-            b =
-                button(title()) {
-                    action()
-                    b.text = title()
-                    overlay?.setRows(
-                        pages.values.flatMap {
-                            val a = it.getJSONArray("items")
-                            (0 until a.length()).map { i -> a.getJSONObject(i) }
-                        }
-                    )
-                    overlay?.invalidate()
-                }
-            body.addView(
-                b,
-                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(TvStyle.GAP_INLINE) },
-            )
-        }
-        option({ "弹幕：${if(prefs.getBoolean("enabled",true)) "开" else "关"}" }) {
-            prefs.edit().putBoolean("enabled", !prefs.getBoolean("enabled", true)).apply()
-            reset()
-        }
-        option({ "字号：${prefs.getInt("font",24)}" }) {
-            val n = prefs.getInt("font", 24)
-            prefs.edit().putInt("font", if (n >= 32) 20 else n + 4).apply()
-        }
-        option({ "密度：${prefs.getInt("lanes",2)} 行" }) {
-            prefs.edit().putInt("lanes", prefs.getInt("lanes", 2) % 4 + 1).apply()
-        }
-        option({ "速度：${if(prefs.getInt("travel",12000)==12000) "慢速" else "标准"}" }) {
-            prefs
-                .edit()
-                .putInt("travel", if (prefs.getInt("travel", 12000) == 12000) 9000 else 12000)
-                .apply()
-        }
+        body.addView(section("显示方式"))
+        body.addView(modeRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(section("速度"))
+        body.addView(speedRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(
+            scaleSlider,
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_BLOCK) },
+        )
+        body.addView(
+            alphaSlider,
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
+        )
         body.addView(
             button("重新读取弹幕") {
                 reset()
                 d.dismiss()
             },
-            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(TvStyle.GAP_INLINE) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_BLOCK) },
         )
-        body.addView(label("真实时间轴弹幕；无内容时不使用普通评论代替。", 14f, TvStyle.muted))
+        body.addView(
+            label("真实时间轴弹幕；表情标签显示为图片，无内容时不使用普通评论代替。", 13f, TvStyle.muted)
+                .apply { setPadding(dp(12), dp(TvStyle.GAP_INLINE), dp(12), dp(9)) }
+        )
         body.addView(
             button("关闭") { d.dismiss() },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(TvStyle.GAP_INLINE) },
@@ -277,8 +349,106 @@ class TvSocial(
         d.setOnDismissListener { if (anchor.isAttachedToWindow) anchor.requestFocus() }
         d.window?.setBackgroundDrawableResource(android.R.color.transparent)
         d.show()
-        d.window?.setLayout(dp(520), -2)
-        body.getChildAt(1).requestFocus()
+        d.window?.setLayout(dp(620), -2)
+        modeRow.getChildAt(0).requestFocus()
+    }
+
+    /** 面板里的小标题：与上方控件拉开一段距离，和下面的按钮贴在一起。 */
+    private fun section(text: String) =
+        label(text, 14f, TvStyle.muted).apply {
+            setPadding(dp(12), dp(TvStyle.GAP_BLOCK), dp(12), dp(2))
+        }
+
+    /**
+     * 一行单选按钮：选中按进去、焦点打亮，和全站按钮同一套三台阶。
+     *
+     * [selected] 每次点击后重新取一遍，避免把状态复制到每个按钮上各存一份。
+     */
+    private fun choices(
+        labels: List<String>,
+        selected: () -> Int,
+        choose: (Int) -> Unit,
+    ): LinearLayout {
+        val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+        val views = mutableListOf<TextView>()
+        fun paint(view: TextView) {
+            val focused = view.hasFocus()
+            val chosen = view.isSelected
+            view.background =
+                when {
+                    focused ->
+                        TvStyle.soft(
+                            activity,
+                            TvStyle.lit,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            SoftStyle.RAISED,
+                            glow = TvStyle.litGlow,
+                            depth = 1.2f,
+                        )
+                    chosen ->
+                        TvStyle.well(
+                            activity,
+                            TvStyle.well,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            depth = 1.15f,
+                        )
+                    else ->
+                        TvStyle.soft(
+                            activity,
+                            TvStyle.surface,
+                            TvStyle.RADIUS_PILL,
+                            TvStyle.SOFT_BAND,
+                            SoftStyle.RAISED,
+                        )
+                }
+            view.setTextColor(
+                when {
+                    focused -> TvStyle.onLit
+                    chosen -> TvStyle.accent
+                    else -> TvStyle.text
+                }
+            )
+        }
+        lateinit var sync: () -> Unit
+        sync = {
+            val index = selected()
+            views.forEachIndexed { i, view ->
+                view.isSelected = i == index
+                paint(view)
+            }
+        }
+        labels.forEachIndexed { index, text ->
+            val view =
+                TextView(activity).apply {
+                    id = View.generateViewId()
+                    this.text = text
+                    textSize = 14f
+                    includeFontPadding = false
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    minimumHeight = dp(TvStyle.BUTTON_COMPACT)
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    setOnFocusChangeListener { v, focused ->
+                        paint(v as TextView)
+                        TvStyle.focus(v, focused)
+                    }
+                    setOnClickListener {
+                        choose(index)
+                        sync()
+                    }
+                }
+            views += view
+            row.addView(
+                view,
+                LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(TvStyle.GAP_INLINE) },
+            )
+        }
+        sync()
+        return row
     }
 
     fun showComments(anchor: View, target: Pair<String, String>? = null) {
@@ -499,52 +669,5 @@ class TvSocial(
         }
         tabs.getChildAt(0).requestFocus()
         read()
-    }
-
-    private inner class BulletView : View(activity) {
-        var running = false
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD }
-        private var rows = emptyList<Triple<String, Long, Int>>()
-
-        fun setRows(values: List<JSONObject>) {
-            val lanes = prefs.getInt("lanes", 2)
-            val travel = prefs.getInt("travel", 12000)
-            val free = LongArray(lanes)
-            val seen = mutableSetOf<String>()
-            rows =
-                values
-                    .sortedBy { it.getLong("timeMS") }
-                    .mapNotNull {
-                        val at = it.getLong("timeMS")
-                        val lane = free.indexOfFirst { t -> t <= at }
-                        if (lane < 0 || !seen.add(it.getString("id"))) null
-                        else {
-                            free[lane] = at + travel
-                            Triple(it.getString("text"), at, lane)
-                        }
-                    }
-            invalidate()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val p = player() ?: return
-            if (!active || !prefs.getBoolean("enabled", true)) return
-            val now = p.currentPosition
-            val travel = prefs.getInt("travel", 12000)
-            paint.textSize = dp(prefs.getInt("font", 24)).toFloat()
-            for ((text, at, lane) in rows) if (now >= at && now < at + travel) {
-                val x = width - (width + paint.measureText(text)) * (now - at).toFloat() / travel
-                val y = dp(65) + lane * (paint.textSize + dp(12))
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = dp(2).toFloat()
-                paint.color = Color.BLACK
-                canvas.drawText(text, x, y, paint)
-                paint.style = Paint.Style.FILL
-                paint.color = Color.WHITE
-                canvas.drawText(text, x, y, paint)
-            }
-            if (running && isAttachedToWindow) postInvalidateOnAnimation()
-        }
     }
 }

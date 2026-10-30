@@ -15,6 +15,8 @@ https://github.com/charlie901208/HGTV/tree/feat/phone-login 。`DeviceRegister.k
 
 `kotlin-tv/` 原生应用源码和派生实现以 GPL-3.0-only 发布，许可证全文见 `LICENSE`。发布 APK 时同时提供本分支对应源码、Gradle 包装器和构建说明。APK 不包含 Node、React Native、JavaScript 引擎或该 JavaScript 源文件。`tools/signing-oracle.cjs` 仅为开发期生成对照测试数据的工具，不参与应用构建或运行。
 
+时间轴弹幕的模型与渲染（`core` 的 `Danmaku.kt`、`DanmakuEmoji.kt`，`app` 的 `DanmakuView.kt`、`DanmakuEmojiStore.kt`、`DanmakuSlider.kt`）移植并改写自 GPL-3.0-only 的 HGTV 参考实现：轨道调度、四种显示方式、速度档位、重复聚合与中央突出、表情图片绘制均沿用其做法，再按本仓库的数据结构、包名、界面材质和 HUD 留白重排。未纳入其账号、广告、遥测或其他界面代码。原作者著作权保留。
+
 其他依赖：
 
 - ZXing core（本机生成手机输入与更新二维码）：https://github.com/zxing/zxing — Apache-2.0
@@ -66,4 +68,4 @@ Users are responsible for ensuring their use complies with applicable laws
 and terms of service. The authors disclaim any responsibility for misuse
 of this software.
 
-评论表情图使用 Microsoft Fluent Emoji（MIT），通过 GPL HGTV 参考项目取得；许可全文随 APK assets/comment_emoji/LICENSE.txt 分发。为通用替代表情，非红果官方贴图。
+评论与弹幕表情图使用 Microsoft Fluent Emoji（MIT），通过 GPL HGTV 参考项目取得；许可全文随 APK `assets/comment_emoji/LICENSE.txt` 与 `assets/danmaku_emoji/LICENSE.txt` 分发。为通用替代表情，非红果官方贴图。

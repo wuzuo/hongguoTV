@@ -105,11 +105,10 @@ internal class ContinuousCatalogView(
                     isClickable = false
                     isLongClickable = false
                     if (this is ViewGroup) descendantFocusability = FOCUS_BLOCK_DESCENDANTS
-                    background =
-                        TvStyle.card(
-                            context,
-                            grid.hasFocus() && grid.selectedItemPosition == position,
-                        )
+                    TvStyle.cardFocus(
+                        this,
+                        grid.hasFocus() && grid.selectedItemPosition == position,
+                    )
                 }
             }
         }
@@ -241,11 +240,13 @@ internal class ContinuousCatalogView(
         }
 
     private fun paintFocus() {
-        for (i in 0 until grid.childCount) grid.getChildAt(i).background =
-            TvStyle.card(
-                context,
-                grid.hasFocus() && grid.firstVisiblePosition + i == grid.selectedItemPosition,
-            )
+        for (i in 0 until grid.childCount) {
+            val child = grid.getChildAt(i)
+            val focused =
+                grid.hasFocus() && grid.firstVisiblePosition + i == grid.selectedItemPosition
+            TvStyle.cardFocus(child, focused)
+            (child as? CatalogPosterCard)?.highlight(focused)
+        }
     }
 
     private fun paintStatus() {
@@ -469,6 +470,12 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
                 )
                 .filter { it.isNotBlank() }
                 .joinToString("，")
+    }
+
+    /** 焦点时剧名转亮、副标题提亮：光晕之外再给一个明确的读数。 */
+    fun highlight(focused: Boolean) {
+        title.setTextColor(if (focused) TvStyle.textStrong else TvStyle.text)
+        badge.alpha = if (focused) 1f else .72f
     }
 
     fun fitHeight(available: Int) {

@@ -53,6 +53,11 @@ class TvSocialTest {
             if (v is ViewGroup) (0 until v.childCount).flatMap { views(v.getChildAt(it)) }
             else emptyList()
 
+    private fun allViews(v: View): List<View> =
+        listOf(v) +
+            if (v is ViewGroup) (0 until v.childCount).flatMap { allViews(v.getChildAt(it)) }
+            else emptyList()
+
     private fun flush(social: TvSocial) {
         val f = social.javaClass.getDeclaredField("worker").apply { isAccessible = true }
         (f.get(social) as ExecutorService).submit {}.get(5, TimeUnit.SECONDS)
@@ -132,11 +137,27 @@ class TvSocialTest {
             social.attach(root)
             social.settings(anchor)
             val d = ShadowDialog.getLatestDialog()
-            val buttons = views(d.window!!.decorView)
-            buttons.first { it.text.toString().startsWith("弹幕：") }.performClick()
-            assertFalse(a.getSharedPreferences("social", 0).getBoolean("enabled", true))
-            buttons.first { it.text.toString().startsWith("字号：") }.performClick()
-            assertEquals(28, a.getSharedPreferences("social", 0).getInt("font", 24))
+            val all = allViews(d.window!!.decorView)
+            val prefs = a.getSharedPreferences("social", 0)
+            // 显示方式：隐藏后两条滑条退出焦点，切回全屏再恢复。
+            all.filterIsInstance<TextView>().first { it.text == "隐藏弹幕" }.performClick()
+            assertEquals("hidden", prefs.getString("mode", null))
+            val scale = all.first { it.contentDescription?.startsWith("字号") == true }
+            assertFalse(scale.isEnabled)
+            all.filterIsInstance<TextView>().first { it.text == "全屏显示" }.performClick()
+            assertEquals("full", prefs.getString("mode", null))
+            assertTrue(scale.isEnabled)
+            // 速度档位即时写盘。
+            all.filterIsInstance<TextView>().first { it.text == "快速" }.performClick()
+            assertEquals("fast", prefs.getString("speed", null))
+            // 左右键逐档调字号 / 透明度，调完立即保存。
+            val right = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT)
+            val left = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT)
+            assertTrue(scale.onKeyDown(KeyEvent.KEYCODE_DPAD_RIGHT, right))
+            assertEquals(1.1f, prefs.getFloat("scale", 1f), .001f)
+            val alpha = all.first { it.contentDescription?.startsWith("透明度") == true }
+            assertTrue(alpha.onKeyDown(KeyEvent.KEYCODE_DPAD_LEFT, left))
+            assertEquals(.9f, prefs.getFloat("alpha", 1f), .001f)
             social.foreground(false)
             social.reset()
             d.dismiss()

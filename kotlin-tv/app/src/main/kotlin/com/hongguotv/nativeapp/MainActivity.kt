@@ -1587,16 +1587,15 @@ class MainActivity : Activity() {
                     card.contentDescription =
                         "$rankLabel，${item.title}，${position?.heat?.ifBlank { "热度暂无" } ?: "热度暂无"}"
                 }
-                card.addView(
+                val title =
                     text(item.title, 14f, TvStyle.text).apply {
                         maxLines = 2
                         minLines = 2
                         ellipsize = TextUtils.TruncateAt.END
                         setTypeface(null, Typeface.BOLD)
                         setPadding(dp(3), dp(7), dp(3), 0)
-                    },
-                    lp(-1, -2).apply { weight = 1f },
-                )
+                    }
+                card.addView(title, lp(-1, -2).apply { weight = 1f })
                 val cloud = if (isAccountHistory()) cloudAccount.progress(item.id) else null
                 val progress =
                     cloud?.let {
@@ -1662,7 +1661,9 @@ class MainActivity : Activity() {
                     } else false
                 }
                 card.setOnFocusChangeListener { view, focused ->
-                    card.background = TvStyle.card(this, focused)
+                    TvStyle.cardFocus(card, focused)
+                    title.setTextColor(if (focused) TvStyle.textStrong else TvStyle.text)
+                    badge.alpha = if (focused) 1f else .72f
                     TvStyle.focus(view, focused, 1.02f)
                     if (focused) {
                         catalogFocus = item.id

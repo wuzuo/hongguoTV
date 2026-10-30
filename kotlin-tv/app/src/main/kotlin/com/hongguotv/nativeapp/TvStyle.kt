@@ -3,6 +3,7 @@ package com.hongguotv.nativeapp
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.animation.DecelerateInterpolator
@@ -234,11 +235,31 @@ internal object TvStyle {
         if (focused) {
             soft(
                 context, surfaceHigh, RADIUS_CARD, SOFT_BAND, SoftStyle.RAISED,
-                glow = litGlow, depth = 1.35f,
+                glow = litGlow, depth = 1.5f,
             )
         } else {
             soft(context, surface, RADIUS_CARD, SOFT_BAND, SoftStyle.RAISED)
         }
+
+    /**
+     * 卡片焦点描边：盖在内容之上的一圈强调色细线（`View.foreground`，API 23 起可用）。
+     *
+     * 光晕在客厅距离上不够醒目，海报又占掉卡片大部分面积，因此再补一圈线：
+     * 底板只抬一档，这一圈线负责让人一眼看出遥控器停在哪一部剧上。
+     */
+    fun focusRing(context: Context, radius: Int = RADIUS_CARD, width: Int = 2): Drawable =
+        GradientDrawable().apply {
+            setColor(Color.TRANSPARENT)
+            val density = context.resources.displayMetrics.density
+            cornerRadius = radius * density
+            setStroke((width * density).toInt(), accent)
+        }
+
+    /** 卡片焦点：底板 + 描边 + 剧名转亮，三处一起变，远看也能分清。 */
+    fun cardFocus(view: View, focused: Boolean, radius: Int = RADIUS_CARD) {
+        view.background = card(view.context, focused)
+        view.foreground = if (focused) focusRing(view.context, radius) else null
+    }
 
     /** 焦点反馈：只缩放，不位移（位移会打乱行内对齐）。 */
     fun focus(view: View, focused: Boolean, scale: Float = FOCUS_SCALE, duration: Long = DURATION) {

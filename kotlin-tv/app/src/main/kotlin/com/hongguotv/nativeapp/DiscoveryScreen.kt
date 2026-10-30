@@ -149,20 +149,22 @@ internal class DiscoveryScreen(
         TextView(context).apply {
             id = View.generateViewId()
             text = label
-            textSize = 12f
+            textSize = 12.5f
             includeFontPadding = false
             maxLines = 1
+            gravity = android.view.Gravity.CENTER
             isFocusable = true
             isClickable = true
             val band = 4
             val density = resources.displayMetrics.density
             setPadding(
-                (12 * density).toInt() + (band * density).toInt(),
-                (band * density).toInt() + (3 * density).toInt(),
-                (12 * density).toInt() + (band * density).toInt(),
-                (band * density).toInt() + (3 * density).toInt(),
+                (10 * density).toInt() + (band * density).toInt(),
+                (band * density).toInt() + (1 * density).toInt(),
+                (10 * density).toInt() + (band * density).toInt(),
+                (band * density).toInt() + (1 * density).toInt(),
             )
-            minHeight = dp(44)
+            minHeight = dp(34)
+            minWidth = dp(52)
             fun paint() {
                 val selected = chosen()
                 val focused = hasFocus()
@@ -251,8 +253,10 @@ internal class DiscoveryScreen(
                         text = group.label
                         textSize = 12f
                         setTextColor(TvStyle.muted)
+                        maxLines = 1
+                        gravity = android.view.Gravity.CENTER_VERTICAL
                     },
-                    LayoutParams(dp(40), -2),
+                    LayoutParams(dp(40), -2).apply { rightMargin = dp(8) },
                 )
             val choices = LinearLayout(context)
             val all = DiscoveryFilter("", "全部")
@@ -268,9 +272,6 @@ internal class DiscoveryScreen(
                                     state.selection.choose(group.type, option.id),
                                     group.type to option.id,
                                 )
-                        }
-                        .apply {
-                            if (group.type != "genre") minHeight = dp(40)
                         }
                 controls[group.type to option.id] = chip
                 choices.addView(chip, LayoutParams(-2, -2).apply { rightMargin = dp(5) })
