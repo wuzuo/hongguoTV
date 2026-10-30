@@ -845,6 +845,16 @@ class MainActivity : Activity() {
         }
     }
 
+    /** 海报角标文案：优先用进度推导出的总集数，没有集数时回退到剧集自身的 badge 标签。 */
+    private fun posterEpisodeLabel(series: Series): String {
+        val total =
+            maxOf(
+                EpisodeSummary.total(series.badge),
+                EpisodeSummary.total(cloudAccount.progress(series.id)?.series?.badge.orEmpty()),
+            )
+        return if (total > 0) "共 $total 集" else EpisodeSummary.poster(series.badge)
+    }
+
     private fun collectionEpisodeLabel(series: Series): String {
         val remote = isAccountFavorites() || isAccountHistory() || tab == 5
         val cloud = if (remote) cloudAccount.progress(series.id) else null
@@ -1097,6 +1107,8 @@ class MainActivity : Activity() {
                         imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
                         setPadding(dp(20), dp(TvStyle.SOFT_BAND), dp(20), dp(TvStyle.SOFT_BAND))
                         background = plate(TvStyle.well, TvStyle.RADIUS_PILL, inset = true)
+                        // 上下键用于在导航、筛选项和联想词之间移动，避免遥控器被困在输入框里。
+                        escapeVerticalFocus()
                     }
                 searchRow.addView(
                     input,
@@ -1535,6 +1547,9 @@ class MainActivity : Activity() {
             return
         }
         val cards = mutableListOf<View>()
+        val cardTitles = mutableListOf<TextView>()
+        val cardBadges = mutableListOf<TextView>()
+        val compactBadges = mutableListOf<String>()
         val count = 6
         val gap = dp(14)
         val width =
@@ -1561,6 +1576,21 @@ class MainActivity : Activity() {
                 artwork.addView(image, FrameLayout.LayoutParams(-1, -1))
                 loadCover(image, item.cover)
                 cardImages[item.id] = image to item.cover
+                val episodeBadge = posterEpisodeLabel(item)
+                if (episodeBadge.isNotEmpty())
+                    artwork.addView(
+                        text(episodeBadge, 11.5f, TvStyle.playerText).apply {
+                            includeFontPadding = false
+                            maxLines = 1
+                            gravity = Gravity.CENTER
+                            setPadding(dp(8), dp(3), dp(8), dp(3))
+                            background = rounded(0xCC1A1A1A.toInt(), radius = TvStyle.RADIUS_PILL)
+                        },
+                        FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+                            rightMargin = dp(8)
+                            bottomMargin = dp(8)
+                        },
+                    )
                 if (tab == 2) {
                     val rankLabel = position?.rank?.let { "第 $it 名" } ?: "名次暂无"
                     artwork.addView(
@@ -1596,6 +1626,7 @@ class MainActivity : Activity() {
                         setPadding(dp(3), dp(7), dp(3), 0)
                     }
                 card.addView(title, lp(-1, -2).apply { weight = 1f })
+                cardTitles += title
                 val cloud = if (isAccountHistory()) cloudAccount.progress(item.id) else null
                 val progress =
                     cloud?.let {
@@ -1632,6 +1663,13 @@ class MainActivity : Activity() {
                             setPadding(dp(3), 0, 0, 0)
                         }
                 card.addView(badge, lp(-1, -2))
+                cardBadges += badge
+                compactBadges +=
+                    summary
+                        .lines()
+                        .drop(1)
+                        .joinToString(" · ")
+                        .ifEmpty { summary }
                 if (isLocalFavorites()) favoriteBadges[item.id] = badge
                 card.setOnClickListener {
                     if (reservationNotice(item, card)) return@setOnClickListener
@@ -1676,7 +1714,9 @@ class MainActivity : Activity() {
                                     when {
                                         line.top < scroll.scrollY -> line.top
                                         line.bottom > scroll.scrollY + scroll.height ->
-                                            (line.bottom - scroll.height).coerceAtLeast(0)
+                                            // 一行超过视口时优先保留海报顶端可见，再处理下方副标题。
+                                            if (line.height >= scroll.height) line.top
+                                            else line.bottom - scroll.height
                                         else -> scroll.scrollY
                                     },
                                 )
@@ -1834,20 +1874,43 @@ class MainActivity : Activity() {
         val savedScroll = scrollPositions[catalogPageKey]
         scroll.post {
             if (catalogScroll !== scroll) return@post
-            cards.forEach { view ->
+            // 一行要先装得下才裁海报：先让出第二行标题和长副标题，再才压缩海报高度。
+            val rowCap = (scroll.height - dp(8)).coerceAtLeast(dp(120))
+            val posterHeight = ((width - dp(12)) / TvStyle.POSTER_ASPECT).toInt()
+            cards.forEachIndexed { index, view ->
                 val card = view as LinearLayout
                 val image = card.getChildAt(0)
-                val textHeight =
-                    card.paddingTop +
-                        card.paddingBottom +
-                        (1 until card.childCount).sumOf { card.getChildAt(it).measuredHeight }
-                val target =
-                    minOf(
-                        ((width - dp(8)) / TvStyle.POSTER_ASPECT).toInt(),
-                        (scroll.height - textHeight - dp(4)).coerceAtLeast(dp(48)),
-                    )
-                if (image.layoutParams.height != target)
-                    image.layoutParams = image.layoutParams.apply { height = target }
+                val title = cardTitles[index]
+                val badge = cardBadges[index]
+                var titleLines = title.maxLines
+                var badgeLines = badge.maxLines
+                fun textHeight(): Int {
+                    val band =
+                        card.paddingTop +
+                            card.paddingBottom +
+                            title.paddingTop +
+                            title.paddingBottom
+                    val badgeHeight =
+                        if (badge.visibility == View.GONE) 0
+                        else maxOf(badge.lineHeight * badgeLines, badge.minHeight)
+                    return band + title.lineHeight * titleLines + badgeHeight
+                }
+                while (posterHeight + textHeight() > rowCap && (titleLines > 1 || badgeLines > 1)) {
+                    if (titleLines > 1) titleLines-- else badgeLines--
+                }
+                var poster = posterHeight
+                if (poster + textHeight() > rowCap) poster = (rowCap - textHeight()).coerceAtLeast(dp(60))
+                if (title.maxLines != titleLines) {
+                    title.minLines = titleLines
+                    title.maxLines = titleLines
+                }
+                if (badge.maxLines != badgeLines) {
+                    badge.text = compactBadges[index]
+                    badge.minLines = badgeLines
+                    badge.maxLines = badgeLines
+                    badge.minHeight = dp(if (badgeLines >= 2) 34 else 19)
+                }
+                if (image.layoutParams.height != poster) image.layoutParams = image.layoutParams.apply { height = poster }
             }
             scroll.post settle@{
                 if (catalogScroll !== scroll) return@settle

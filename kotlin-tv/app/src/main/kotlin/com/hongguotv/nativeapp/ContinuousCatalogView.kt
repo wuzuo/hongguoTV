@@ -9,6 +9,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import com.hongguotv.core.EpisodeSummary
 import com.hongguotv.core.RankPosition
 import com.hongguotv.core.Series
 
@@ -424,6 +425,18 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding((3 * resources.displayMetrics.density).toInt(), (3 * resources.displayMetrics.density).toInt(), 0, 0)
         }
+    private val episodes =
+        TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(TvStyle.playerText)
+            includeFontPadding = false
+            maxLines = 1
+            gravity = android.view.Gravity.CENTER
+            val density = resources.displayMetrics.density
+            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            background = TvStyle.shape(context, 0xCC1A1A1A.toInt(), radius = TvStyle.RADIUS_PILL)
+            visibility = GONE
+        }
     private var preferredHeight = 0
 
     init {
@@ -447,6 +460,10 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
                 },
         )
         addView(poster, LayoutParams(-1, preferredHeight))
+        poster.addView(episodes, FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.END).apply {
+            rightMargin = (8 * resources.displayMetrics.density).toInt()
+            bottomMargin = (8 * resources.displayMetrics.density).toInt()
+        })
         addView(title)
         addView(badge)
     }
@@ -454,6 +471,9 @@ internal class CatalogPosterCard(context: Context) : LinearLayout(context) {
     fun show(item: Series, position: RankPosition? = null) {
         title.text = item.title
         badge.text = position?.heat?.takeIf { it.isNotBlank() } ?: item.badge
+        val episodesLabel = EpisodeSummary.poster(item.badge)
+        episodes.text = episodesLabel
+        episodes.visibility = if (episodesLabel.isNotBlank()) View.VISIBLE else View.GONE
         rank.text = position?.rank?.let { "第 $it 名" }.orEmpty()
         rank.visibility = if (position?.rank != null) VISIBLE else GONE
         rank.setTextColor(

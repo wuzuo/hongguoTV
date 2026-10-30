@@ -41,6 +41,7 @@ class DiscoveryScreenTest {
             }
         val state =
             DiscoveryBrowserState().apply {
+                expanded = true
                 loaded = true
                 selection = DiscoverySelection(mapOf("category_dim_role" to "cate_29"))
                 groups =
@@ -231,6 +232,11 @@ class DiscoveryScreenTest {
             ShadowLooper.idleMainLooper()
             val browser = views(screen).filterIsInstance<ContinuousCatalogView>().single()
             browser.enter()
+            assertFalse(state.expanded)
+            views(screen)
+                .filterIsInstance<TextView>()
+                .single { it.text.toString() == "展开筛选" }
+                .performClick()
             assertTrue(state.expanded)
             views(screen)
                 .filterIsInstance<TextView>()

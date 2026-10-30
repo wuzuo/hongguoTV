@@ -37,6 +37,8 @@ internal class TvSearchPanel(
             setSelection(text.length)
             setPadding(dp(18), dp(TvStyle.SOFT_BAND), dp(18), dp(TvStyle.SOFT_BAND))
             background = TvStyle.well(context, TvStyle.well, TvStyle.RADIUS_PILL, TvStyle.SOFT_BAND)
+            // 上下键交给屏幕键盘和联想词，遥控器不会被困在输入框里。
+            escapeVerticalFocus()
         }
     val results = LinearLayout(context).apply { orientation = VERTICAL }
     private val keys = mutableListOf<TextView>()

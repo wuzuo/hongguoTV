@@ -3,13 +3,14 @@ package com.hongguotv.core
 
 /** A checkpoint is a resume position, never proof that all preceding episodes were watched. */
 object EpisodeSummary {
+    private val totalPattern = Regex("(?:全|共|更新至)\\s*(\\d+)\\s*集")
+    private val posterPattern = Regex("(?:全|共|更新至第?)\\s*\\d+\\s*集")
+
     fun total(badge: String): Int =
-        Regex("(?:全|共|更新至)\\s*(\\d+)\\s*集")
-            .find(badge)
-            ?.groupValues
-            ?.get(1)
-            ?.toIntOrNull()
-            ?.takeIf { it > 0 } ?: 0
+        totalPattern.find(badge)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 } ?: 0
+
+    /** 提取海报角标用的集数文案，例如「全 80 集」「更新至 90 集」；没有集数信息时返回空串。 */
+    fun poster(badge: String): String = posterPattern.find(badge)?.value.orEmpty()
 
     fun label(
         total: Int,

@@ -81,7 +81,8 @@ class DiscoveryBrowserState {
     var next: DiscoveryCursor? = null
     var loaded = false
     var position: Pair<String, Int>? = null
-    var expanded = true
+    // 默认收起筛选面板：找剧进来先把海报墙放在最前面，按「展开筛选」再调条件。
+    var expanded = false
     var headerOffset = 0
     var browseStep = 0
     var filterVerticalOffset = 0

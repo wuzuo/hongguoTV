@@ -22,6 +22,14 @@ class EpisodeSummaryTest {
     }
 
     @Test
+    fun posterExtractsEpisodeCountForCornerBadge() {
+        assertEquals("全 80 集", EpisodeSummary.poster("全 80 集"))
+        assertEquals("更新至 90 集", EpisodeSummary.poster("更新至 90 集"))
+        assertEquals("更新至第 12 集", EpisodeSummary.poster("更新至第 12 集"))
+        assertEquals("", EpisodeSummary.poster("重生"))
+    }
+
+    @Test
     fun reservationTotalsUseOptionalBatchMetadataWithoutHidingListOnFailure() {
         for (fail in listOf(false, true)) {
             var calls = 0
