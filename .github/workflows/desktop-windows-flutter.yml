@@ -2,7 +2,11 @@ name: Build Windows Flutter client
 
 on:
   push:
-    branches: [main, 'feature-windows-client']
+    # Windows work happens on feature/fix branches until the client lands in main, so match the
+    # whole `feature-windows-*` / `fix-windows-*` families: an exact `feature-windows-client`
+    # entry silently skipped every side branch (e.g. feature-windows-danmaku), so pushing to one
+    # never started a build at all.
+    branches: [main, 'feature-windows-*', 'fix-windows-*']
     paths:
       - 'desktop-windows-flutter/**'
       - 'desktop-mac/backend/**'
@@ -10,7 +14,9 @@ on:
       - 'scripts/build-windows-flutter.ps1'
       - '.github/workflows/desktop-windows-flutter.yml'
   pull_request:
-    branches: [main]
+    # Must include the Windows feature branches too: a PR into `feature-windows-client` is the
+    # normal review path right now, and `main`-only here left those PRs without a build.
+    branches: [main, 'feature-windows-*', 'fix-windows-*']
     paths:
       - 'desktop-windows-flutter/**'
       - 'desktop-mac/backend/**'

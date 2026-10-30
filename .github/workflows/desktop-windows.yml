@@ -2,7 +2,10 @@ name: Build Windows portable client
 
 on:
   push:
-    branches: [main, 'feature-windows-client']
+    # Same branch policy as desktop-windows-flutter.yml: match the whole `feature-windows-*` /
+    # `fix-windows-*` families so side branches get built, not just the exact
+    # `feature-windows-client` name.
+    branches: [main, 'feature-windows-*', 'fix-windows-*']
     paths:
       - 'desktop-windows/**'
       - 'desktop-mac/backend/**'
@@ -10,7 +13,7 @@ on:
       - 'scripts/build-windows.ps1'
       - '.github/workflows/desktop-windows.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'feature-windows-*', 'fix-windows-*']
     paths:
       - 'desktop-windows/**'
       - 'desktop-mac/backend/**'
