@@ -2,13 +2,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_session.dart';
+import '../danmaku.dart';
+import '../danmaku_layer.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
@@ -73,15 +74,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _savedMaximized = false;
 
   // Danmaku state.
+  //
+  // 弹幕按 30 秒窗口分页取，窗口起点是 key：换集、快进、改设置都只需要丢掉旧窗口重取，
+  // 不必把整集重新拉一遍。`_danmaku` 是当前所有窗口去重合并后的结果，交给渲染层。
+  final Map<int, List<TimedComment>> _danmakuPages = {};
   List<TimedComment> _danmaku = const [];
-  int _danmakuLoadedUntil = 0;
   int _danmakuGeneration = 0;
   bool _danmakuLoading = false;
-  bool _danmakuEnabled = true;
+  int _danmakuFailedAt = 0;
+
+  DanmakuMode get _danmakuMode => widget.session.store.danmakuMode;
+
+  /// 隐藏前的那一档：快捷开关只做「显示 ↔ 隐藏」，不把用户选的档位改回全屏。
+  DanmakuMode _lastVisibleMode = DanmakuMode.full;
+
+  Object _danmakuSettingsKey = 0;
 
   @override
   void initState() {
     super.initState();
+    _danmakuSettingsKey = _settingsKey();
+    if (_danmakuMode.showsStyle) _lastVisibleMode = _danmakuMode;
+    widget.session.store.addListener(_onDanmakuSettingsChanged);
     _index = widget.index.clamp(0, widget.detail.episodes.length - 1);
     _player = Player(configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024));
     _controller = VideoController(_player);
@@ -91,21 +105,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // A seek (or resume) can jump seconds at a time; discard danmaku windows from
         // the old position so loading resumes around the new one instead of stalling.
         final jump = (value.inMilliseconds - _position.inMilliseconds).abs();
+        final seeked = jump > 5000;
         setState(() {
           _position = value;
-          if (jump > 5000) {
+          if (seeked) {
+            _danmakuPages.clear();
             _danmaku = const [];
             _danmakuGeneration += 1;
-            _danmakuLoadedUntil = value.inMilliseconds ~/ 30000 * 30000;
           }
         });
-        if (_danmakuEnabled && value.inMilliseconds > _danmakuLoadedUntil - 15000) {
-          unawaited(_loadDanmaku());
-        }
+        _maybeLoadDanmaku();
         _maybePreloadNext();
       }),
       _player.stream.duration.listen((value) {
-        if (mounted) setState(() => _duration = value);
+        if (!mounted) return;
+        setState(() => _duration = value);
+        // 时长到位才知道整集多长：暂停起播（位置不再推进）时靠这里补第一次取弹幕。
+        _maybeLoadDanmaku();
       }),
       _player.stream.buffer.listen((value) {
         if (mounted) setState(() => _buffer = value);
@@ -129,6 +145,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    widget.session.store.removeListener(_onDanmakuSettingsChanged);
     _saveProgress();
     _saveTimer?.cancel();
     _hideTimer?.cancel();
@@ -161,7 +178,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (widget.detail.episodes.isEmpty) return;
     final target = index.clamp(0, widget.detail.episodes.length - 1);
     final generation = ++_generation;
-    final resumeMs = (position * 1000).round();
     _saveProgress();
     _hideTimer?.cancel();
     _seamlessTimer?.cancel();
@@ -178,9 +194,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _position = Duration.zero;
       _duration = Duration.zero;
       _buffer = Duration.zero;
+      _danmakuPages.clear();
       _danmaku = const [];
       _danmakuGeneration += 1;
-      _danmakuLoadedUntil = resumeMs > 30000 ? resumeMs ~/ 30000 * 30000 : 0;
+      _danmakuFailedAt = 0;
     });
     if (seamless) {
       _seamlessTimer = Timer(const Duration(milliseconds: 700), () {
@@ -210,7 +227,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _seamless = false;
         _seamlessSlow = false;
       });
-      unawaited(_loadDanmaku());
+      _maybeLoadDanmaku();
     } catch (problem) {
       _seamlessTimer?.cancel();
       if (!mounted || generation != _generation) return;
@@ -242,43 +259,296 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Future<void> _loadDanmaku() async {
-    if (!_danmakuEnabled || _danmakuLoading || _episodeId.isEmpty) return;
+  /// 弹幕四项设置的身份：播放进度每 5 秒也会通知一次 store，
+  /// 只有这四项真的变了才重建播放器。
+  Object _settingsKey() {
+    final store = widget.session.store;
+    return Object.hash(
+      store.danmakuMode,
+      store.danmakuSpeed,
+      store.danmakuScale,
+      store.danmakuAlpha,
+    );
+  }
+
+  void _onDanmakuSettingsChanged() {
+    final key = _settingsKey();
+    if (key == _danmakuSettingsKey) return;
+    _danmakuSettingsKey = key;
+    if (!mounted) return;
+    final mode = _danmakuMode;
+    if (mode.showsStyle) _lastVisibleMode = mode;
+    setState(() {});
+    // 从隐藏切回可见时要补取一次；切换到隐藏档则不必再发请求。
+    _maybeLoadDanmaku();
+  }
+
+  /// 快捷开关：只在「显示」与「隐藏」之间切，隐藏前的档位留着。
+  void _toggleDanmaku() {
+    final store = widget.session.store;
+    if (store.danmakuMode.showsStyle) {
+      _lastVisibleMode = store.danmakuMode;
+      store.updateDanmakuMode(DanmakuMode.hidden);
+      return;
+    }
+    store.updateDanmakuMode(_lastVisibleMode);
+    _maybeLoadDanmaku();
+  }
+
+  /// 弹幕设置面板：显示方式与速度各一组选项，字号与透明度各一条滑条。
+  ///
+  /// 四项都即时生效（改完立刻能看到画面变化），不需要「保存」，与 TV 端一致。
+  Future<void> _openDanmakuSettings() => showDialog<void>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setLocal) {
+        final store = widget.session.store;
+        final mode = store.danmakuMode;
+        void change(VoidCallback action) {
+          action();
+          setLocal(() {});
+        }
+
+        Widget group(String title, Widget child) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            child,
+          ],
+        );
+
+        Widget slider({
+          required String title,
+          required double value,
+          required double min,
+          required double max,
+          required int divisions,
+          required String readout,
+          required ValueChanged<double>? onChanged,
+        }) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(title, style: const TextStyle(fontSize: 13)),
+                const Spacer(),
+                Text(
+                  readout,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions,
+              label: readout,
+              onChanged: onChanged,
+            ),
+          ],
+        );
+
+        return AlertDialog(
+          title: const Text('弹幕设置'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  group(
+                    '显示方式',
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        for (final item in DanmakuMode.values)
+                          ChoiceChip(
+                            label: Text(item.label),
+                            selected: mode == item,
+                            onSelected: (_) =>
+                                change(() => store.updateDanmakuMode(item)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  group(
+                    '速度',
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final item in DanmakuSpeed.values)
+                          ChoiceChip(
+                            label: Text(item.label),
+                            selected: store.danmakuSpeed == item,
+                            onSelected: (_) =>
+                                change(() => store.updateDanmakuSpeed(item)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  slider(
+                    title: '字号',
+                    value: store.danmakuScale,
+                    min: DanmakuStyle.scaleMin,
+                    max: DanmakuStyle.scaleMax,
+                    divisions:
+                        ((DanmakuStyle.scaleMax - DanmakuStyle.scaleMin) /
+                                DanmakuStyle.scaleStep)
+                            .round(),
+                    readout: DanmakuStyle.percent(store.danmakuScale),
+                    onChanged: mode.showsStyle
+                        ? (value) => change(() => store.updateDanmakuScale(value))
+                        : null,
+                  ),
+                  slider(
+                    title: '透明度',
+                    value: store.danmakuAlpha,
+                    min: DanmakuStyle.alphaMin,
+                    max: DanmakuStyle.alphaMax,
+                    divisions:
+                        ((DanmakuStyle.alphaMax - DanmakuStyle.alphaMin) /
+                                DanmakuStyle.alphaStep)
+                            .round(),
+                    readout: DanmakuStyle.percent(store.danmakuAlpha),
+                    onChanged: mode.showsStyle
+                        ? (value) => change(() => store.updateDanmakuAlpha(value))
+                        : null,
+                  ),
+                  if (!mode.showsStyle)
+                    Text(
+                      '已隐藏弹幕：字号与透明度在切回任意一档显示方式后生效。',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _reloadDanmaku();
+                Navigator.of(context).pop();
+              },
+              child: const Text('重新读取弹幕'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  /// 一次只排一个窗口，命中就返回：播放位置每几百毫秒推进一次，串行补窗口足够跟上。
+  ///
+  /// 窗口起点取当前位置所在的 30 秒格：贴近格尾时补下一格，靠近格头时回补上一格，
+  /// 这样跨格的那一刻画面上不会突然空一段。
+  void _maybeLoadDanmaku() {
+    if (!_danmakuMode.showsStyle || _danmakuLoading || _episodeId.isEmpty) return;
     final total = _duration.inMilliseconds;
     // Duration arrives shortly after `open`; without it the request cannot describe the
     // episode, so wait for the next position tick instead of sending a made-up length.
     if (total <= 0) return;
-    final start = _danmakuLoadedUntil;
-    if (_position.inMilliseconds < start - 3000) return;
-    if (start >= total) return;
+    final now = _position.inMilliseconds;
+    if (now >= total) return;
+    // 失败后歇 15 秒再试：弹幕是可选功能，接口不通时不能每秒都打一次请求。
+    if (_danmakuFailedAt != 0 &&
+        DateTime.now().millisecondsSinceEpoch - _danmakuFailedAt < 15000) {
+      return;
+    }
+    final base = now ~/ 30000 * 30000;
+    final wanted = <int>{
+      base,
+      if (base > 0 && now - base < 15000) base - 30000,
+      if (now - base > 20000 && base + 30000 < total) base + 30000,
+    };
+    for (final start in wanted) {
+      if (start < 0 || start >= total) continue;
+      if (_danmakuPages.containsKey(start)) continue;
+      unawaited(_loadDanmaku(start, total));
+      return;
+    }
+  }
+
+  /// [durationMs] 是整集时长（等价于平台的 `playlet_item_duration`），不是这一窗的长度：
+  /// 本机服务按它校验时间轴并给出下一窗的起点。
+  Future<void> _loadDanmaku(int start, int durationMs) async {
     _danmakuLoading = true;
     final ticket = _danmakuGeneration;
     final episode = _episodeId;
-    // The bridge expects the *episode* length here, not the length of the requested
-    // window. Passing a fixed 60 s made every page after the first minute invalid, so
-    // danmaku silently stopped loading for the rest of the episode.
-    final duration = total > start ? total : start + 60000;
     try {
       final page = await widget.session.api.danmaku(
         widget.detail.series.id,
         episode,
         startMs: start,
-        durationMs: duration,
+        durationMs: durationMs,
       );
       if (!mounted || episode != _episodeId || ticket != _danmakuGeneration) return;
       setState(() {
-        // Only the last half minute can still be on screen; keeping every page for a
-        // 90-minute episode would grow without bound.
-        final cutoff = _position.inMilliseconds - 30000;
-        final kept = _danmaku.where((item) => item.timeMs >= cutoff).toList();
-        _danmaku = [...kept, ...page.items];
-        _danmakuLoadedUntil = page.nextMs > start ? page.nextMs : start + 60000;
+        _danmakuPages[start] = page.items;
+        _pruneDanmakuPages(start);
+        _danmaku = _mergedDanmaku();
       });
     } catch (_) {
       // Danmaku is optional; playback must keep working when the endpoint fails.
+      _danmakuFailedAt = DateTime.now().millisecondsSinceEpoch;
     } finally {
       _danmakuLoading = false;
     }
+  }
+
+  /// 只留当前窗口前后各一到两格：整集九十多分钟全留着会让合并与重排越来越慢。
+  void _pruneDanmakuPages(int anchor) {
+    if (_danmakuPages.length <= 6) return;
+    final keys = _danmakuPages.keys.toList()
+      ..sort((a, b) => (a - anchor).abs().compareTo((b - anchor).abs()));
+    for (final key in keys.skip(6)) {
+      _danmakuPages.remove(key);
+    }
+  }
+
+  /// 相邻窗口在边界上会重复同一条，因此按 id 去重后再交给渲染层。
+  List<TimedComment> _mergedDanmaku() {
+    final seen = <String>{};
+    final items = <TimedComment>[];
+    for (final page in _danmakuPages.values) {
+      for (final item in page) {
+        if (seen.add(item.id)) items.add(item);
+      }
+    }
+    items.sort((a, b) => a.timeMs.compareTo(b.timeMs));
+    return items;
+  }
+
+  /// 设置面板里的「重新读取弹幕」：丢掉已取到的窗口，从当前位置重来一次。
+  void _reloadDanmaku() {
+    setState(() {
+      _danmakuPages.clear();
+      _danmaku = const [];
+      _danmakuGeneration += 1;
+      _danmakuFailedAt = 0;
+    });
+    _maybeLoadDanmaku();
   }
 
   Future<void> _handleCompleted() async {
@@ -545,21 +815,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _videoLayer({bool danmaku = true}) => AnimatedOpacity(
-    opacity: _error == null ? 1 : 0,
-    duration: const Duration(milliseconds: 200),
-    child: Video(
-      controller: _controller,
-      fit: BoxFit.contain,
-      controls: (state) => danmaku && _danmakuEnabled
-          ? DanmakuLayer(
-              comments: _danmaku,
-              positionMs: _position.inMilliseconds,
-              playing: _playing,
-            )
-          : const SizedBox.shrink(),
-    ),
-  );
+  Widget _videoLayer({bool danmaku = true}) {
+    final store = widget.session.store;
+    return AnimatedOpacity(
+      opacity: _error == null ? 1 : 0,
+      duration: const Duration(milliseconds: 200),
+      child: Video(
+        controller: _controller,
+        fit: BoxFit.contain,
+        controls: (state) => danmaku && store.danmakuMode.showsStyle
+            ? DanmakuLayer(
+                comments: _danmaku,
+                positionMs: _position.inMilliseconds,
+                playing: _playing,
+                mode: store.danmakuMode,
+                speed: store.danmakuSpeed,
+                textScale: store.danmakuScale,
+                textAlpha: store.danmakuAlpha,
+              )
+            : const SizedBox.shrink(),
+      ),
+    );
+  }
 
   Widget _loadingLayer() => Container(
     color: Colors.black.withValues(alpha: 0.72),
@@ -699,12 +976,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
               icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white),
             ),
             IconButton(
-              tooltip: _danmakuEnabled ? '关闭弹幕' : '开启弹幕',
-              onPressed: () => setState(() => _danmakuEnabled = !_danmakuEnabled),
+              tooltip: _danmakuMode.showsStyle ? '关闭弹幕' : '开启弹幕',
+              onPressed: _toggleDanmaku,
               icon: Icon(
-                _danmakuEnabled ? Icons.subtitles : Icons.subtitles_off,
+                _danmakuMode.showsStyle ? Icons.subtitles : Icons.subtitles_off,
                 color: Colors.white,
               ),
+            ),
+            IconButton(
+              tooltip: '弹幕设置',
+              onPressed: () => unawaited(_openDanmakuSettings()),
+              icon: const Icon(Icons.tune, color: Colors.white),
             ),
             IconButton(
               tooltip: '选集',
@@ -1026,111 +1308,3 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// Two-lane danmaku layer drawn above the video surface. Entries travel right to left over
-/// 8 seconds starting at their timestamp.
-///
-/// libmpv reports `time-pos` only a few times per second, so a purely
-/// position-driven layer would visibly stutter. The ticker extrapolates between player
-/// updates using a local clock, and re-anchors whenever a new position arrives.
-class DanmakuLayer extends StatefulWidget {
-  const DanmakuLayer({
-    super.key,
-    required this.comments,
-    required this.positionMs,
-    required this.playing,
-  });
-
-  final List<TimedComment> comments;
-  final int positionMs;
-  final bool playing;
-
-  static const travelMs = 10000;
-
-  @override
-  State<DanmakuLayer> createState() => _DanmakuLayerState();
-}
-
-class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  int _anchorMs = 0;
-  int _anchoredAt = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _sync();
-    _ticker = createTicker((_) {
-      if (widget.playing) setState(() {});
-    });
-    _ticker.muted = !widget.playing;
-    _ticker.start();
-  }
-
-  @override
-  void didUpdateWidget(DanmakuLayer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.positionMs != oldWidget.positionMs) _sync();
-    _ticker.muted = !widget.playing;
-  }
-
-  @override
-  void dispose() {
-    _ticker.dispose();
-    super.dispose();
-  }
-
-  void _sync() {
-    _anchorMs = widget.positionMs;
-    _anchoredAt = DateTime.now().millisecondsSinceEpoch;
-  }
-
-  int get _now {
-    if (!widget.playing) return widget.positionMs;
-    // Never extrapolate more than 600 ms past the last real update: a stalled or seeked
-    // player then resyncs on the next update instead of drifting.
-    final drift = DateTime.now().millisecondsSinceEpoch - _anchoredAt;
-    return _anchorMs + (drift > 600 ? 600 : drift);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.comments.isEmpty) return const SizedBox.shrink();
-    final positionMs = _now;
-    return IgnorePointer(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          const lanes = 3;
-          final laneHeight = 28.0;
-          final visible = <Widget>[];
-          for (final item in widget.comments) {
-            final elapsed = positionMs - item.timeMs;
-            if (elapsed < 0 || elapsed > DanmakuLayer.travelMs) continue;
-            final progress = elapsed / DanmakuLayer.travelMs;
-            final x = width - (width + 320) * progress;
-            // A time bucket keeps a comment in the same lane even when older pages are
-            // pruned from the front of the list (an index-based lane would jump).
-            final lane = (item.timeMs ~/ 2000) % lanes;
-            visible.add(
-              Positioned(
-                left: x,
-                top: 12 + lane * laneHeight,
-                child: Text(
-                  item.text,
-                  maxLines: 1,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    shadows: [Shadow(blurRadius: 4, color: Colors.black87)],
-                  ),
-                ),
-              ),
-            );
-          }
-          return ClipRect(child: Stack(children: visible));
-        },
-      ),
-    );
-  }
-}

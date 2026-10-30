@@ -181,7 +181,7 @@ Mac 与 TV **分别管理版本号和更新清单**。Mac 固定读取 GitCode �
 
 支持 **Windows 10/11 x64**，以便携 ZIP 分发：解压后运行客户端程序，自带运行环境与播放库，无需安装 Java 或 VLC。
 
-- **Flutter 重构版（验收中）**：`desktop-windows-flutter/`。界面参照「红果鉴」的浅色 / 深色主题，播放改用 media_kit（libmpv），新增弹幕画面叠加；[构建与使用说明](desktop-windows-flutter/README.md)。尚未发布正式下载包，可通过 GitHub Actions 构件或本地脚本构建。
+- **Flutter 重构版（验收中）**：`desktop-windows-flutter/`。界面参照「红果鉴」的浅色 / 深色主题，播放改用 media_kit（libmpv），新增弹幕画面叠加（四种显示方式、三档速度、字号与透明度可调，重复弹幕聚合与中央突出）；[构建与使用说明](desktop-windows-flutter/README.md)。尚未发布正式下载包，可通过 GitHub Actions 构件或本地脚本构建。
 - **Compose 版（当前正式分发的回退版本）**：`desktop-windows/`。使用 Compose Desktop 与 libVLC；[构建与使用说明](desktop-windows/README.md)。待 Flutter 版人工验收后再切换。
 
 两版功能一致：首页推荐、搜索、找剧（漫剧 / 真人剧 / AI 剧与题材筛选）、热播榜、相关作品、详情选集、480P/720P/1080P、倍速、自动下一集、断点续播、本机收藏与观看记录；红果扫码或手机号 + 验证码登录后可查看账户历史、收藏、预约并同步播放进度。登录态用 Windows DPAPI 绑定当前用户加密保存在本机。Flutter 版的自动下一集不弹出控制栏与全屏加载层，并会提前预加载下集首段数据以缩短切换缓冲；播放器还可切换为置顶迷你窗口，支持拖动与双击还原。

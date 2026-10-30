@@ -7,6 +7,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:win32/win32.dart';
 
+import 'danmaku.dart';
 import 'models.dart';
 
 abstract final class AppDirs {
@@ -39,6 +40,13 @@ class LocalStore extends ChangeNotifier {
   double speed = 1;
   bool autoNext = true;
   String themeMode = 'system';
+
+  /// 弹幕设置：显示方式、速度档位、字号缩放与透明度，与 TV 端同一套取值。
+  DanmakuMode danmakuMode = DanmakuMode.full;
+  DanmakuSpeed danmakuSpeed = DanmakuSpeed.normal;
+  double danmakuScale = 1;
+  double danmakuAlpha = 1;
+
   String? loadError;
   String? saveError;
 
@@ -98,6 +106,10 @@ class LocalStore extends ChangeNotifier {
       autoNext = root['autoNext'] as bool? ?? true;
       final mode = root['themeMode'] as String? ?? 'system';
       themeMode = const {'light', 'dark', 'system'}.contains(mode) ? mode : 'system';
+      danmakuMode = DanmakuMode.fromStored(root['danmakuMode'] as String?);
+      danmakuSpeed = DanmakuSpeed.fromStored(root['danmakuSpeed'] as String?);
+      danmakuScale = DanmakuStyle.scale((root['danmakuScale'] as num?)?.toDouble() ?? 1);
+      danmakuAlpha = DanmakuStyle.alpha((root['danmakuAlpha'] as num?)?.toDouble() ?? 1);
     } catch (_) {
       // Preferences are disposable: fall back to defaults.
     }
@@ -168,6 +180,36 @@ class LocalStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateDanmakuMode(DanmakuMode value) {
+    if (danmakuMode == value) return;
+    danmakuMode = value;
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void updateDanmakuSpeed(DanmakuSpeed value) {
+    if (danmakuSpeed == value) return;
+    danmakuSpeed = value;
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void updateDanmakuScale(double value) {
+    final next = DanmakuStyle.scale(value);
+    if (danmakuScale == next) return;
+    danmakuScale = next;
+    _savePreferences();
+    notifyListeners();
+  }
+
+  void updateDanmakuAlpha(double value) {
+    final next = DanmakuStyle.alpha(value);
+    if (danmakuAlpha == next) return;
+    danmakuAlpha = next;
+    _savePreferences();
+    notifyListeners();
+  }
+
   void _saveLibrary() {
     try {
       _writeAtomically(
@@ -196,6 +238,10 @@ class LocalStore extends ChangeNotifier {
             'speed': speed,
             'autoNext': autoNext,
             'themeMode': themeMode,
+            'danmakuMode': danmakuMode.storedValue,
+            'danmakuSpeed': danmakuSpeed.storedValue,
+            'danmakuScale': danmakuScale,
+            'danmakuAlpha': danmakuAlpha,
           }),
         ),
       );
